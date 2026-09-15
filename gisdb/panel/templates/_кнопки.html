@@ -1,0 +1,12 @@
+{# Общий хвост формы решения: причина, подпись времени, три кнопки. #}
+<label for="комментарий">Причина или замечание
+  <span class="приглушённо" style="font-weight:400">— при отклонении обязательно</span></label>
+<input type="text" id="комментарий" name="комментарий"
+       placeholder="чего не хватает в черновике или почему он неверен">
+<input type="hidden" name="открыто" value="{{ открыто }}">
+<div class="кнопки">
+  <button class="принять" type="submit" name="решение" value="подтверждён">Подтвердить</button>
+  <button class="отклонить" type="submit" name="решение" value="отклонён">Отклонить</button>
+  <button type="submit" name="решение" value="черновик">Сохранить правку, решение позже</button>
+  <span class="приглушённо">в очереди черновиков: {{ осталось }}</span>
+</div>

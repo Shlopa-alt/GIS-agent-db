@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ к.code }} <span class="приглушённо" style="font-size:15px">статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">Понятие подтверждает человек: определение решает, какие
+связи признаков с ним имеют смысл. Род понятия важен не меньше определения —
+условие наблюдения (обнажённость, рельеф) объясняет, что видно на съёмке, и не
+является рудоконтролирующим фактором.</p>
+
+<dl class="факты">
+  <dt>Род понятия</dt><dd>{{ к.kind }}</dd>
+  <dt>Связей признаков</dt>
+  <dd>{{ к.связей }}
+    {% for код, роль, статус in к.признаки %}
+      <br>{{ код }} <span class="приглушённо">— {{ роль }} ({{ статус }})</span>
+    {% endfor %}
+    {% if к.связей > к.признаки|length %}
+      <br><span class="приглушённо">и ещё {{ к.связей - к.признаки|length }}</span>
+    {% endif %}</dd>
+</dl>
+
+<form class="решение" method="post" action="/решение/понятия/{{ к.id }}">
+  <label for="definition">{{ подписи.definition }}</label>
+  <textarea id="definition" name="definition">{{ к.definition or "" }}</textarea>
+  <label for="source">{{ подписи.source }}</label>
+  <input type="text" id="source" name="source" value="{{ к.source or "" }}">
+  <label for="note">{{ подписи.note }}</label>
+  <input type="text" id="note" name="note" value="{{ к.note or "" }}">
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ к.code }} <span class="приглушённо" style="font-size:15px">группа {{ к.группа }},
+  статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">Черновик составлен автоматически{% if к.model %} моделью
+  {{ к.model }}{% endif %}. Ниже — те же факты, по которым его писала модель.</p>
+
+<dl class="факты">
+  <dt>Техническое описание</dt><dd>{{ к.техническое }}</dd>
+  {% for и in к.источники %}
+  <dt>Слой-источник</dt>
+  <dd>{{ и.слой }} <span class="приглушённо">({{ и.поставщик or "поставщик не указан" }}{% if и.разрешение_м %}, {{ "%.0f"|format(и.разрешение_м) }} м{% endif %})</span>
+    {% if и.метод %}<br><span class="приглушённо">{{ и.метод }}</span>{% endif %}</dd>
+  {% endfor %}
+  {% if not к.источники %}
+  <dt>Слой-источник</dt><dd class="приглушённо">не указан: признак посчитан внутри проекта</dd>
+  {% endif %}
+  <dt>Территория и сетка</dt><dd>{{ к.территория or "не указана" }}, {{ к.сетка or "сетка не указана" }}</dd>
+  <dt>Свёртка в ячейку</dt><dd>{{ к.aggregation_rule or "не указана" }}</dd>
+  <dt>Покрытие территории</dt>
+  <dd>{{ "%.3f"|format(к.coverage_frac) }} (пропусков {{ "%.3f"|format(к.missing_frac) }});
+      зависит от контура съёмки: {{ "да" if к.footprint_dependent else "нет" }}</dd>
+  <dt>Входит в формулу ВНИГНИ</dt>
+  <dd>{% if к.circularity %}<span class="метка внимание">да — риск замкнутого вывода</span>
+      {% else %}нет{% endif %}</dd>
+  <dt>Переносимость</dt><dd>{{ к.transferability }}</dd>
+  {% if к.значений %}
+  <dt>Значения в базе</dt>
+  <dd>{{ к.значений }} ячеек: от {{ "%.4g"|format(к.мин) }} до {{ "%.4g"|format(к.макс) }},
+      среднее {{ "%.4g"|format(к.среднее) }}, отклонение {{ "%.4g"|format(к.ско) }}</dd>
+  {% endif %}
+  <dt>Паспортов с этим кодом</dt>
+  <dd>{{ к.сборки|length }}
+    {% for номер, сборка, статус in к.сборки %}
+      <br><span class="приглушённо">{{ сборка or "сборка не указана" }} — {{ статус }}</span>
+    {% endfor %}</dd>
+  {% if к.понятия %}
+  <dt>Связи с понятиями</dt>
+  <dd>{% for понятие, роль, статус in к.понятия %}{{ понятие }} ({{ роль }}, {{ статус }}){% if not loop.last %}; {% endif %}{% endfor %}</dd>
+  {% endif %}
+</dl>
+
+<details>
+  <summary>Что именно видела модель</summary>
+  <pre>{{ к.задача }}</pre>
+</details>
+
+<form class="решение" method="post" action="/решение/признаки/{{ к.id }}">
+  <label for="geological_meaning">{{ подписи.geological_meaning }}</label>
+  <textarea id="geological_meaning" name="geological_meaning">{{ к.geological_meaning or "" }}</textarea>
+  <label for="kb_reference">{{ подписи.kb_reference }}</label>
+  <textarea id="kb_reference" name="kb_reference" style="min-height:64px">{{ к.kb_reference or "" }}</textarea>
+  {% if к.черновиков_с_кодом > 1 %}
+  <label style="font-weight:400">
+    <input type="checkbox" name="все_сборки" value="да" checked>
+    применить решение ко всем черновикам с кодом {{ к.code }} ({{ к.черновиков_с_кодом }}) —
+    смысл признака от сборки не зависит
+  </label>
+  {% endif %}
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

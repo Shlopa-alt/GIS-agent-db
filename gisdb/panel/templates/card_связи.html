@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ к.code }} → {{ к.concept_code }}
+  <span class="приглушённо" style="font-size:15px">статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">Гипотеза о том, к какому рудоконтролирующему фактору
+относится признак{% if к.model %}; составлена моделью {{ к.model }}{% endif %}.
+Происхождение: {{ к.origin }}.</p>
+
+<dl class="факты">
+  <dt>Смысл признака в паспорте</dt><dd>{{ к.geological_meaning or "не заполнен" }}</dd>
+  <dt>На чём основана связь</dt><dd>{{ к.evidence_ref or "не указано" }}</dd>
+</dl>
+
+<form class="решение" method="post" action="/решение/связи/{{ к.id }}">
+  <label for="concept_code">{{ подписи.concept_code }}</label>
+  <input type="text" id="concept_code" name="concept_code" value="{{ к.concept_code or "" }}">
+  <label for="role">{{ подписи.role }}</label>
+  <select id="role" name="role">
+    {% for вариант in ["прямой", "прокси"] %}
+    <option value="{{ вариант }}" {% if вариант == к.role %}selected{% endif %}>{{ вариант }}</option>
+    {% endfor %}
+  </select>
+  <label for="note">{{ подписи.note }}</label>
+  <textarea id="note" name="note" style="min-height:64px">{{ к.note or "" }}</textarea>
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

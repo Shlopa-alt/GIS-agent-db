@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Панель подтверждений{% endblock %}</title>
+<style>
+  :root { --поле: #f6f5f2; --рамка: #d8d4cc; --текст: #1e1c19; --акцент: #7a5c2e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+         color: var(--текст); background: #fbfaf8; }
+  header { background: #2f2a24; color: #f3efe8; padding: 10px 20px;
+           display: flex; gap: 18px; align-items: baseline; }
+  header a { color: #f3efe8; text-decoration: none; border-bottom: 1px solid transparent; }
+  header a:hover { border-color: #c9a86a; }
+  header .кто { margin-left: auto; opacity: .7; font-size: 13px; }
+  main { max-width: 1060px; margin: 0 auto; padding: 22px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 26px 0 8px; }
+  .подзаголовок { color: #6b655c; margin: 0 0 18px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; }
+  th, td { border: 1px solid var(--рамка); padding: 6px 9px; text-align: left;
+           vertical-align: top; font-size: 14px; }
+  th { background: var(--поле); font-weight: 600; }
+  tr:hover td { background: #fffdf7; }
+  .число { text-align: right; font-variant-numeric: tabular-nums; }
+  .приглушённо { color: #7d766c; }
+  a { color: var(--акцент); }
+  .карточки { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0 6px; }
+  .плитка { flex: 1 1 210px; background: #fff; border: 1px solid var(--рамка);
+            border-radius: 4px; padding: 14px 16px; text-decoration: none; color: inherit; }
+  .плитка:hover { border-color: var(--акцент); }
+  .плитка .счёт { font-size: 30px; font-weight: 600; }
+  .плитка .мелко { font-size: 13px; color: #7d766c; }
+  form.решение { background: #fff; border: 1px solid var(--рамка); border-radius: 4px;
+                 padding: 16px 18px; margin-top: 18px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 12px 0 4px; }
+  textarea, input[type=text], input[type=url], select {
+      width: 100%; font: inherit; padding: 7px 9px;
+      border: 1px solid var(--рамка); border-radius: 3px; background: #fffefb; }
+  textarea { min-height: 96px; resize: vertical; }
+  .кнопки { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; padding: 8px 16px; border-radius: 3px; cursor: pointer;
+           border: 1px solid var(--рамка); background: var(--поле); }
+  button.принять { background: #2f6b3a; border-color: #2f6b3a; color: #fff; }
+  button.отклонить { background: #8c3a2e; border-color: #8c3a2e; color: #fff; }
+  button:hover { filter: brightness(1.08); }
+  dl.факты { display: grid; grid-template-columns: 260px 1fr; gap: 4px 14px;
+             margin: 0; background: #fff; border: 1px solid var(--рамка); padding: 14px 16px; }
+  dl.факты dt { font-weight: 600; font-size: 13px; color: #4a453d; }
+  dl.факты dd { margin: 0; font-size: 14px; }
+  details { margin-top: 14px; background: #fff; border: 1px solid var(--рамка); padding: 10px 14px; }
+  details pre { white-space: pre-wrap; font: 13px/1.45 Consolas, monospace; margin: 8px 0 0; }
+  .метка { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 12px;
+           background: var(--поле); border: 1px solid var(--рамка); }
+  .метка.внимание { background: #f7e9e4; border-color: #d8b6ab; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Панель подтверждений</strong>
+  <a href="/">Очереди</a>
+  <a href="/журнал">Журнал решений</a>
+  <span class="кто">{% if кто %}проверяющий: {{ кто }} · <a href="/вход">сменить</a>{% endif %}</span>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

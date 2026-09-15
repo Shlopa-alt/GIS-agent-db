@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ к.code }} <span class="приглушённо" style="font-size:15px">статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">Лицензию подтверждает человек: от неё зависит, можно ли
+распространять производные — карты, признаки и отчёты по этим слоям.</p>
+
+<dl class="факты">
+  <dt>Слоёв на этой лицензии</dt>
+  <dd>{{ к.слои|length }}
+    {% for код, название, статус in к.слои %}
+      <br>{{ код }} <span class="приглушённо">— {{ название }} ({{ статус }})</span>
+    {% endfor %}</dd>
+  <dt>Признаков зависит</dt><dd>{{ к.признаков }}</dd>
+</dl>
+
+<form class="решение" method="post" action="/решение/лицензии/{{ к.id }}">
+  <label for="title">{{ подписи.title }}</label>
+  <input type="text" id="title" name="title" value="{{ к.title or "" }}">
+  <label for="url">{{ подписи.url }}</label>
+  <input type="text" id="url" name="url" value="{{ к.url or "" }}">
+  <label style="font-weight:400">
+    <input type="checkbox" name="allows_redistribution" value="да"
+           {% if к.allows_redistribution %}checked{% endif %}>
+    {{ подписи.allows_redistribution }}
+  </label>
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

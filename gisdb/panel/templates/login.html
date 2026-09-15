@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Кто проверяет</h1>
+<p class="подзаголовок">Имя ставится подписью под каждым решением: в паспорте
+(«подтвердил») и в журнале решений. Это подпись, а не вход в систему — панель
+работает только на этой машине.</p>
+<form class="решение" method="post" action="/вход">
+  <label for="имя">Фамилия и инициалы</label>
+  <input type="text" id="имя" name="имя" required autofocus placeholder="Иванов И. И.">
+  <div class="кнопки"><button class="принять" type="submit">Начать работу</button></div>
+</form>
+{% endblock %}

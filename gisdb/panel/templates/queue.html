@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ вид.заголовок }}</h1>
+<p class="подзаголовок">
+  {% for с in статусы %}
+    <a href="/очередь/{{ вид.ключ }}?статус={{ с }}"
+       {% if с == статус %}style="font-weight:600"{% endif %}>{{ с }}</a>{% if not loop.last %} · {% endif %}
+  {% endfor %}
+  — показано {{ записи|length }}
+</p>
+
+{% if not записи %}
+<p>Очередь пуста.</p>
+{% else %}
+<form method="post" action="/пакет/{{ вид.ключ }}">
+<table>
+  <tr>
+    <th style="width:28px"></th>
+    <th>Код</th>
+    {% if вид.ключ == "признаки" %}<th>Группа</th><th class="число">Паспортов</th>{% endif %}
+    <th>Черновик</th>
+    <th>Чей</th>
+    <th></th>
+  </tr>
+  {% for з in записи %}
+  <tr>
+    <td><input type="checkbox" name="отмечено" value="{{ з.id }}"></td>
+    <td><a href="/карточка/{{ вид.ключ }}/{{ з.id }}">{{ з.код }}</a>
+        {% if з.формула %}<br><span class="метка внимание">в формуле ВНИГНИ</span>{% endif %}</td>
+    {% if вид.ключ == "признаки" %}
+    <td>{{ з.группа or "" }}</td><td class="число">{{ з.паспортов }}</td>
+    {% endif %}
+    <td>{% if з.текст %}{{ з.текст[:220] }}{% if з.текст|length > 220 %}…{% endif %}
+        {% else %}<span class="приглушённо">не заполнено</span>{% endif %}</td>
+    <td class="приглушённо">{{ з.модель or "—" }}</td>
+    <td><a href="/карточка/{{ вид.ключ }}/{{ з.id }}">открыть</a></td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% if статус == "черновик" %}
+<p class="приглушённо" style="margin-top:14px">Пакетное решение — для очевидных
+случаев; всё, что требует чтения фактов, открывается карточкой.</p>
+<label for="комментарий">Общая причина (обязательна при отклонении)</label>
+<input type="text" id="комментарий" name="комментарий" placeholder="например: формулировка не следует из физики съёмки">
+<div class="кнопки">
+  <button class="принять" type="submit" name="решение" value="подтверждён">Подтвердить отмеченные</button>
+  <button class="отклонить" type="submit" name="решение" value="отклонён">Отклонить отмеченные</button>
+</div>
+{% endif %}
+</form>
+{% endif %}
+{% endblock %}

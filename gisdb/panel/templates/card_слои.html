@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ к.code }} <span class="приглушённо" style="font-size:15px">{{ к.kind }}, статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">{{ к.title }}</p>
+
+<dl class="факты">
+  <dt>Поставщик</dt><dd>{{ к.provider or "не указан" }}</dd>
+  <dt>Откуда качается</dt>
+  <dd>{% if к.url %}<a href="{{ к.url }}">{{ к.url }}</a>{% else %}ссылка не указана{% endif %}</dd>
+  <dt>Файл</dt><dd>{{ к.path or "не указан" }}
+    {% if к.size_bytes %}<span class="приглушённо">, {{ "%.1f"|format(к.size_bytes / 1048576) }} МБ</span>{% endif %}
+    {% if к.evicted %}<br><span class="метка внимание">файл выселен с диска</span>{% endif %}</dd>
+  <dt>Контрольная сумма</dt><dd class="приглушённо">{{ (к.checksum or "нет")[:32] }}</dd>
+  <dt>Формат и координаты</dt><dd>{{ к.format or "—" }}, {{ к.crs or "—" }}{% if к.resolution_m %}, разрешение {{ "%.0f"|format(к.resolution_m) }} м{% endif %}</dd>
+  <dt>Съёмка</dt><dd>{{ к.acquired_from or "—" }} — {{ к.acquired_to or "—" }}</dd>
+  <dt>Покрытие территории</dt>
+  <dd>{% if к.coverage_frac is not none %}{{ "%.3f"|format(к.coverage_frac) }}
+      (пропусков {{ "%.3f"|format(к.missing_frac or 0) }}){% else %}не считалось{% endif %}</dd>
+  <dt>Признаков из слоя</dt><dd>{{ к.признаков }}</dd>
+</dl>
+
+<form class="решение" method="post" action="/решение/слои/{{ к.id }}">
+  <label for="source_note">{{ подписи.source_note }}</label>
+  <textarea id="source_note" name="source_note" style="min-height:64px">{{ к.source_note or "" }}</textarea>
+  <label for="method">{{ подписи.method }}</label>
+  <textarea id="method" name="method">{{ к.method or "" }}</textarea>
+  <label for="footprint_note">{{ подписи.footprint_note }}</label>
+  <textarea id="footprint_note" name="footprint_note" style="min-height:64px">{{ к.footprint_note or "" }}</textarea>
+  <label for="license_id">{{ подписи.license_id }}</label>
+  <select id="license_id" name="license_id">
+    <option value="">— не определена —</option>
+    {% for номер, код, название, статус in к.лицензии %}
+    <option value="{{ номер }}" {% if номер == к.license_id %}selected{% endif %}>
+      {{ код }} — {{ название or "" }} ({{ статус }})</option>
+    {% endfor %}
+  </select>
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}
