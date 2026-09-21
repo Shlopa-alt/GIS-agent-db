@@ -10,8 +10,8 @@ CREATE TABLE runs.llm_call (
     id            bigserial PRIMARY KEY,
     run_id        bigint REFERENCES runs.run(id),
     at            timestamptz NOT NULL DEFAULT now(),
-    provider      text NOT NULL,     -- 'облако' | 'локальный'
-    model         text NOT NULL,     -- 'claude-opus-5', 'qwen2.5-14b-instruct-q4' и т. п.
+    provider      text NOT NULL,     -- 'локальный' (прежние прогоны — и внешние)
+    model         text NOT NULL,     -- 'gemma4:12b', 'qwen2.5-14b-instruct-q4' и т. п.
     task          text,              -- 'смысл признака', 'паспорт слоя'
     subject       text,              -- к чему относится: код признака или слоя
     context_chars integer,           -- длина задачи в символах
