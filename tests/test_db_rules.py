@@ -91,6 +91,10 @@ def test_агент_не_подтверждает(агент, таблица, к
 
 def test_человек_подтверждает_и_подписывается(человек):
     номер = первый(человек, "SELECT id FROM meta.license LIMIT 1")
+    # Запись могла быть подтверждена человеком раньше — тогда подпись уже стоит
+    # его именем, и проверять было бы нечего. Снятие подтверждения возвращает
+    # строку в исходное состояние; соединение всё равно откатывается.
+    человек.execute("UPDATE meta.license SET status = 'черновик' WHERE id = %s", (номер,))
     человек.execute("UPDATE meta.license SET status = 'подтверждён' WHERE id = %s", (номер,))
     статус, кем, когда = человек.execute(
         "SELECT status, confirmed_by, confirmed_at FROM meta.license WHERE id = %s", (номер,)
