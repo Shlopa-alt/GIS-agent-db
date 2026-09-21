@@ -68,6 +68,7 @@ database system is starting up». Если база должна
 | `sql/008_concepts.sql` | справочник понятий `kb.concept`, ссылка на него из связей |
 | `sql/009_concept_queue.sql` | понятия встают в очередь к человеку (номер для панели, вид в журнале) |
 | `sql/010_model_digest.sql` | отпечаток весов модели в журнале обращений — чем именно сделан паспорт |
+| `sql/011_integrity.sql` | вердикт только членам `gis_confirmer`; версия признака по хешу входа; индексы; закрытые списки |
 
 ```
 psql -h localhost -p 5433 -U gisadmin -d gis_au_u -v ON_ERROR_STOP=1 -f db/sql/002_schema.sql
@@ -216,10 +217,13 @@ python db/set_password.py gis_human
 ## Правила, зашитые в базу
 
 1. `gis_agent` не может выполнить `DELETE` нигде, кроме `staging`.
-2. Статус `подтверждён` в `meta.license`, `meta.layer_passport`,
-   `meta.feature_passport`, `bridge.feature_concept` роль `gis_agent` поставить
-   не может — триггер `meta.guard_confirmation`. При подтверждении человеком
-   `confirmed_by` и `confirmed_at` заполняются сами.
+2. Статусы `подтверждён` и `отклонён` в `meta.license`, `meta.layer_passport`,
+   `meta.feature_passport`, `bridge.feature_concept`, `kb.concept` ставит только
+   член роли `gis_confirmer` (сейчас это `gis_human`) или суперпользователь —
+   триггер `meta.guard_confirmation`. Это список разрешённых, а не запрещённых:
+   новая роль права на вердикт не получает, пока его не выдали явно
+   (`GRANT gis_confirmer TO …`). При подтверждении `confirmed_by` и
+   `confirmed_at` заполняются сами.
 3. Слой нельзя пометить выселенным (`evicted`) без пометки `evict_note`, как
    его восстановить из источника — триггер `data.guard_eviction`.
 4. Отклонение без причины в `meta.review` не записывается — ограничение
@@ -228,7 +232,7 @@ python db/set_password.py gis_human
 
 ## Перенос на другой сервер
 
-Структура базы целиком лежит в миграциях `sql/001`–`010`, а данные
+Структура базы целиком лежит в миграциях `sql/001`–`011`, а данные
 воспроизводятся скриптами из `data/processed`. Поэтому переехать можно двумя
 путями, и оба рабочие.
 
