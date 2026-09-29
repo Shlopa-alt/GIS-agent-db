@@ -89,6 +89,20 @@ def test_агент_не_подтверждает(агент, таблица, к
         )
 
 
+@pytest.mark.parametrize("таблица, ключ", [
+    ("meta.license", "id"),
+    ("meta.feature_passport", "feature_id"),
+    ("kb.concept", "id"),
+])
+def test_агент_не_отклоняет(агент, таблица, ключ):
+    # Отклонение — такой же вердикт: без строки в meta.review у него нет причины.
+    номер = первый(агент, f"SELECT {ключ} FROM {таблица} LIMIT 1")
+    with pytest.raises(psycopg.errors.RaiseException):
+        агент.execute(
+            f"UPDATE {таблица} SET status = 'отклонён' WHERE {ключ} = %s", (номер,)
+        )
+
+
 def test_человек_подтверждает_и_подписывается(человек):
     номер = первый(человек, "SELECT id FROM meta.license LIMIT 1")
     # Запись могла быть подтверждена человеком раньше — тогда подпись уже стоит

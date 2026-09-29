@@ -117,13 +117,19 @@ def run(
         conn.commit()
 
 
-def add_input(conn: psycopg.Connection, run_id: int, path: Path, kind: str = "файл") -> None:
-    """Записать входной файл прогона вместе с его хешем."""
+def add_input(conn: psycopg.Connection, run_id: int, path: Path, kind: str = "файл") -> str:
+    """Записать входной файл прогона вместе с его хешем; хеш вернуть.
+
+    Хеш нужен и дальше: по нему загрузка решает, новая ли это версия признака.
+    Возвращаем, чтобы не читать гигабайтный файл второй раз.
+    """
+    хеш = checksum(path)
     conn.execute(
         """INSERT INTO runs.run_input (run_id, kind, ref_text, checksum)
            VALUES (%s, %s, %s, %s)""",
-        (run_id, kind, db.store_ref(path), checksum(path)),
+        (run_id, kind, db.store_ref(path), хеш),
     )
+    return хеш
 
 
 def add_metric(conn: psycopg.Connection, run_id: int, name: str, value: float) -> None:
@@ -231,24 +237,48 @@ def ensure_feature(
     assembly: str,
     definition: dict | None = None,
     run_id: int | None = None,
+    source_hash: str | None = None,
 ) -> int:
     """Найти или завести признак.
 
-    Версия привязана к сборке: один и тот же код, собранный по-другому
-    (другое сырьё, код или параметры), — это новая версия. Признак из другой
+    Версия привязана к сборке и к отпечатку входного файла: тот же код из той
+    же сборки, но из изменившегося файла, — это новая версия. Признак из другой
     сборки не делает предыдущую устаревшей, поэтому `is_current` снимается
     только с прошлых версий той же сборки.
+
+    Без отпечатка в ключе повторная загрузка изменившегося файла находила
+    старую запись, видела, что значения уже есть, и молча оставляла старые
+    числа — хотя в журнал прогона уже был записан хеш нового файла.
     """
-    definition = {"сборка": assembly, **(definition or {})}
+    definition = {
+        "сборка": assembly,
+        **({"хеш": source_hash} if source_hash else {}),
+        **(definition or {}),
+    }
+    снять_текущую = (
+        """UPDATE data.feature SET is_current = false, valid_to = now()
+            WHERE code = %s AND definition->>'сборка' = %s AND is_current AND id <> %s"""
+    )
     row = conn.execute(
-        """SELECT id FROM data.feature
+        """SELECT id, is_current FROM data.feature
             WHERE code = %s AND definition->>'сборка' = %s
+              AND (%s::text IS NULL OR definition->>'хеш' = %s::text)
             ORDER BY version DESC LIMIT 1""",
-        (code, assembly),
+        (code, assembly, source_hash, source_hash),
     ).fetchone()
     if row:
-        return row[0]
+        feature_id, текущая = row
+        if not текущая:
+            # Файл вернулся к прежнему содержимому: прежняя версия снова текущая.
+            conn.execute(снять_текущую, (code, assembly, feature_id))
+            conn.execute(
+                "UPDATE data.feature SET is_current = true, valid_to = NULL WHERE id = %s",
+                (feature_id,),
+            )
+        return feature_id
 
+    # Новая версия той же сборки вытесняет прошлую: текущей остаётся одна.
+    conn.execute(снять_текущую, (code, assembly, -1))
     version = conn.execute(
         "SELECT coalesce(max(version), 0) + 1 FROM data.feature WHERE code = %s",
         (code,),
@@ -336,7 +366,7 @@ def load_dataset(
 ) -> dict[str, int]:
     """Перенести датасет-таблицу (row, col, x, y + признаки) в базу целиком."""
     frame = pd.read_parquet(path)
-    add_input(conn, run_id, path)
+    хеш = add_input(conn, run_id, path)
 
     territory_id = ensure_territory(
         conn, territory_code, territory_title, "1:200 000", is_primary
@@ -362,6 +392,7 @@ def load_dataset(
             conn, column, assembly=path.stem,
             definition={"файл": db.store_ref(path), "колонка": column, "сетка": grid_code},
             run_id=run_id,
+            source_hash=хеш,
         )
         written = load_feature_values(conn, feature_id, frame[column], ids)
         if written:
