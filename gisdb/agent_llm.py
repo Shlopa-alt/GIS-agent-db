@@ -274,30 +274,42 @@ class Model:
                 f"неизвестный провайдер: {provider}; в проекте работает только "
                 f"«{ЛОКАЛЬНЫЙ}» — свой сервер моделей"
             )
-        найден = local_url if os.environ.get("GIS_LLM_LOCAL_URL") else локальный_адрес()
-        if not найден:
-            raise RuntimeError(
-                "локальный сервер моделей не отвечает: поднимите его "
-                "(`ollama serve`) или задайте адрес в GIS_LLM_LOCAL_URL"
-            )
-        self.provider, local_url = ЛОКАЛЬНЫЙ, найден
+        self.provider = ЛОКАЛЬНЫЙ
+        # Адрес заданный принимается на слово, неизвестный ищется при первом
+        # запросе: создание объекта сеть не трогает, иначе модель нельзя
+        # создать без поднятого сервера — ни в тестах, ни чтобы посмотреть
+        # настройки.
+        задан = bool(os.environ.get("GIS_LLM_LOCAL_URL")) or local_url != LOCAL_URL
+        self._адрес: str | None = local_url if задан else None
         self.model = model or LOCAL_MODEL
         if not self.model:
             # Имя модели спрашиваем у сервера: в журнале прогона должно стоять,
             # чем именно сделан паспорт, а не безличное «локальная».
-            имена = local_models(local_url) or []
+            имена = local_models(self.local_url) or []
             if not имена:
                 raise RuntimeError(
-                    f"локальный сервер {local_url} не назвал ни одной модели: "
+                    f"локальный сервер {self.local_url} не назвал ни одной модели: "
                     "скачайте её (например, `ollama pull gemma4:12b`) или "
                     "задайте GIS_LLM_LOCAL_MODEL"
                 )
             self.model = имена[0]
         self.context_tokens = context_tokens
         self.temperature = temperature
-        self.local_url = local_url
         self._client = None
         self._digest: str | None = None
+
+    @property
+    def local_url(self) -> str:
+        """Адрес сервера: известный — сразу, иначе перебор известных портов."""
+        if self._адрес is None:
+            найден = локальный_адрес()
+            if not найден:
+                raise RuntimeError(
+                    "локальный сервер моделей не отвечает: поднимите его "
+                    "(`ollama serve`) или задайте адрес в GIS_LLM_LOCAL_URL"
+                )
+            self._адрес = найден
+        return self._адрес
 
     def __repr__(self) -> str:  # для журнала прогона
         return f"{self.provider}:{self.model}"
