@@ -20,10 +20,10 @@ PROCESSED = Path("data/processed")
 ЗАДАНИЯ = {
     "dataset_v6": dict(
         path=PROCESSED / "dataset_v6.parquet",
-        grid_code="лист-R-49-I-II-500м",
+        grid_code="лист-R-48-XI-XII-500м",
         cell_size_m=500,
-        territory_code="R-49-I,II",
-        territory_title="Основной лист, оцифрованная золотая зона",
+        territory_code="R-48-XI,XII",
+        territory_title="Основной лист R-48-XI,XII",
         is_primary=True,
     ),
     "dataset_wide": dict(
