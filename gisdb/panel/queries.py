@@ -221,6 +221,14 @@ def карточка_признака(conn, feature_id: int) -> dict:
             WHERE feature_id = %s""",
         (feature_id,),
     ).fetchall()
+    # Машинные проверки (meta.feature_check): это факты о расчётах, а не
+    # суждения о признаке, поэтому человек их не подтверждает — только читает
+    # рядом с тем, что подтверждает.
+    ф["проверки"] = conn.execute(
+        """SELECT kind, verdict, value, source_ref, note, checked_at
+             FROM meta.feature_check WHERE feature_id = %s ORDER BY kind""",
+        (feature_id,),
+    ).fetchall()
     ф["заголовок"] = ф["code"]
     ф["значения_полей"] = {
         "geological_meaning": ф["geological_meaning"],
