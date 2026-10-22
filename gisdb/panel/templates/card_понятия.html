@@ -28,6 +28,40 @@
   {% include "_кнопки.html" %}
 </form>
 
+{% if к.цитаты %}
+<h2>Литература из базы знаний статей</h2>
+<p class="подзаголовок">Цитату подтверждает человек: поиск в базе знаний
+смысловой и приносит похожее, но чужое — фрагмент может быть про ту же
+альтерацию на другом континенте или утверждать обратное нашему. Отбор
+показывает, насколько узко спрашивали: «без отбора» значит «вообще про золото»,
+а не про нашу площадь.</p>
+
+{% for ц in к.цитаты %}
+<div class="факты" style="display:block; margin-bottom:14px">
+  <p style="margin:0 0 6px">«{{ ц.quote }}»</p>
+  <p class="мелко приглушённо" style="margin:0 0 6px">
+    {{ ц.статья }}{% if ц.page %}, с. {{ ц.page }}{% endif %}
+    {% if ц.ссылка %}— <a href="{{ ц.ссылка }}" target="_blank">{{ ц.ссылка }}</a>{% endif %}
+    <br>нашлось: {{ ц.kb_found_by or "—" }}{% if ц.kb_similarity %},
+    близость {{ "%.2f"|format(ц.kb_similarity) }}{% endif %}
+    · отбор: {{ ц.отбор }}{% if ц.kb_verdict %} · {{ ц.kb_verdict }}{% endif %}
+    · статус: {{ ц.status }}
+  </p>
+  {% if ц.status == "черновик" %}
+  <form class="решение" method="post" action="/решение/цитаты/{{ ц.id }}">
+    <input type="text" name="комментарий"
+           placeholder="причина — при отклонении обязательно">
+    <input type="hidden" name="вернуться" value="/карточка/понятия/{{ к.id }}">
+    <div class="кнопки">
+      <button class="принять" type="submit" name="решение" value="подтверждён">Подтвердить цитату</button>
+      <button class="отклонить" type="submit" name="решение" value="отклонён">Отклонить</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
 {% if к.решения %}
 <h2>Что решали раньше</h2>
 <table>

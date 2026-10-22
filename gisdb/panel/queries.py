@@ -53,6 +53,15 @@ class Вид:
         "kb.concept", "id",
         ("definition", "source", "note"),
     ),
+    # Цитаты правятся не здесь: текст цитаты — дословно из статьи, менять его
+    # нельзя, можно только принять или отклонить. Поэтому полей для правки нет.
+    # Решение выносится прямо в карточке понятия, рядом с его определением;
+    # эта очередь нужна, чтобы черновые цитаты были видны и считались.
+    "цитаты": Вид(
+        "цитаты", "цитата", "Цитаты из статей",
+        "kb.citation", "id",
+        (),
+    ),
 }
 
 # Человеческие подписи полей: в форме правки и в журнале решений.
@@ -152,10 +161,22 @@ SELECT c.id, c.code, c.kind AS group_code, count(b.id) AS паспортов,
  ORDER BY c.kind, c.code
 """
 
+# Цитаты в очереди сгруппированы по понятию только на вид: строка — это цитата,
+# но в столбце кода стоит понятие, под которое она пришла. Так в списке видно,
+# где литературы много, а где её нет вовсе.
+СПИСОК_ЦИТАТ = """
+SELECT ц.id, ц.concept_code AS code, ц.kb_found_by AS group_code, 1 AS паспортов,
+       left(ц.quote, 300) AS текст, NULL AS model, ц.kb_similarity AS покрытие,
+       false AS формула
+  FROM kb.citation ц
+ WHERE ц.status = %s
+ ORDER BY ц.concept_code, ц.kb_similarity DESC NULLS LAST, ц.id
+"""
+
 СПИСКИ = {
     "признаки": СПИСОК_ПРИЗНАКОВ, "слои": СПИСОК_СЛОЁВ,
     "лицензии": СПИСОК_ЛИЦЕНЗИЙ, "связи": СПИСОК_СВЯЗЕЙ,
-    "понятия": СПИСОК_ПОНЯТИЙ,
+    "понятия": СПИСОК_ПОНЯТИЙ, "цитаты": СПИСОК_ЦИТАТ,
 }
 СТОЛБЦЫ_СПИСКА = ("id", "код", "группа", "паспортов", "текст",
                   "модель", "покрытие", "формула")
@@ -319,14 +340,65 @@ def карточка_понятия(conn, concept_id: int) -> dict:
             ORDER BY f.code LIMIT 20""",
         (к["code"],),
     ).fetchall()
+    к["цитаты"] = цитаты_понятия(conn, к["code"])
     к["значения_полей"] = {п: к[п] for п in ВИДЫ["понятия"].поля}
+    return к
+
+
+ЦИТАТЫ = """
+SELECT ц.id, ц.status::text, ц.quote, ц.page, ц.territory, ц.method,
+       ц.kb_similarity, ц.kb_found_by, ц.kb_verdict, ц.concept_code,
+       п.title, п.year, п.url, п.doi, п.authors
+  FROM kb.citation ц
+  JOIN kb.publication п ON п.id = ц.publication_id
+ {где}
+ ORDER BY (ц.status = 'черновик') DESC, ц.kb_similarity DESC NULLS LAST, ц.id
+"""
+
+СТОЛБЦЫ_ЦИТАТЫ = ("id", "status", "quote", "page", "territory", "method",
+                  "kb_similarity", "kb_found_by", "kb_verdict", "concept_code",
+                  "title", "year", "url", "doi", "authors")
+
+
+def _цитата(строка) -> dict:
+    ц = dict(zip(СТОЛБЦЫ_ЦИТАТЫ, строка))
+    авторы = ц.get("authors") or []
+    кто = (авторы[0] + (" и др." if len(авторы) > 1 else "")) if авторы else ""
+    год = f", {ц['year']}" if ц.get("year") else ""
+    ц["статья"] = f"{кто} {ц.get('title') or ''}{год}".strip()
+    ц["ссылка"] = f"https://doi.org/{ц['doi']}" if ц.get("doi") else (ц.get("url") or "")
+    # Чем уже был отбор, тем ближе цитата к нашей территории, а не «вообще к
+    # золоту»: человеку это важнее числа близости.
+    ц["отбор"] = ", ".join(x for x in (ц.get("territory"), ц.get("method")) if x) \
+        or "без отбора по территории и методу"
+    return ц
+
+
+def цитаты_понятия(conn, код: str) -> list[dict]:
+    """Литература под понятие: сперва черновики, внутри — по близости."""
+    строки = conn.execute(ЦИТАТЫ.format(где="WHERE ц.concept_code = %s"), (код,)).fetchall()
+    return [_цитата(с) for с in строки]
+
+
+def карточка_цитаты(conn, citation_id: int) -> dict:
+    """Одна цитата. Главный путь решения — карточка понятия; эта страница нужна
+    для ссылок из очереди и для журнала решений."""
+    строки = conn.execute(ЦИТАТЫ.format(где="WHERE ц.id = %s"), (citation_id,)).fetchall()
+    if not строки:
+        raise KeyError(citation_id)
+    к = _цитата(строки[0])
+    к["заголовок"] = f"{к['concept_code']} ← {(к.get('title') or '')[:60]}"
+    к["понятие_id"] = conn.execute(
+        "SELECT id FROM kb.concept WHERE code = %s", (к["concept_code"],)
+    ).fetchone()[0]
+    к["значения_полей"] = {}
     return к
 
 
 КАРТОЧКИ = {
     "признаки": карточка_признака, "слои": карточка_слоя,
     "лицензии": карточка_лицензии, "связи": карточка_связи,
-    "понятия": карточка_понятия,
+    "понятия": карточка_понятия, "цитаты": карточка_цитаты,
 }
 
 
