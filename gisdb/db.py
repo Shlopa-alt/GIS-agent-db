@@ -29,7 +29,34 @@ PORT: int = int(os.environ.get("GIS_DB_PORT", "5433"))
 DBNAME: str = os.environ.get("GIS_DB_NAME", "gis_au_u")
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
-ROOT: Path = Path(os.environ.get("GIS_DB_ROOT", "F:/GIS-DB"))
+
+#: Где искать хранилище, когда переменная не задана. Жёсткое умолчание на `F:`
+#: пережило переезд на другую машину, и расплата была соразмерной: любая
+#: команда падала на чтении файла пароля, ничего не объясняя. Хранилище
+#: опознаётся не по имени каталога, а по наличию в нём секретов.
+ВОЗМОЖНЫЕ_КОРНИ: tuple[Path, ...] = (
+    Path.home() / "GIS-DB",
+    Path("F:/GIS-DB"),
+    PROJECT_ROOT.parent / "GIS-DB",
+)
+
+
+def _корень() -> Path:
+    """Каталог хранилища: переменная, иначе первый подходящий из известных.
+
+    Не нашлось ни одного — возвращаем первый вариант, чтобы ошибка пришла из
+    `password()` понятным текстом, а не падением при импорте модуля.
+    """
+    задан = os.environ.get("GIS_DB_ROOT")
+    if задан:
+        return Path(задан)
+    for корень in ВОЗМОЖНЫЕ_КОРНИ:
+        if (корень / "secrets").is_dir():
+            return корень
+    return ВОЗМОЖНЫЕ_КОРНИ[0]
+
+
+ROOT: Path = _корень()
 
 SECRETS_DIR: Path = ROOT / "secrets"
 RASTER_DIR: Path = ROOT / "raster"      # архив растров (COG) вне базы
@@ -44,7 +71,15 @@ def password(role: str) -> str:
     from_env = os.environ.get(f"GIS_DB_PASSWORD_{role.upper()}")
     if from_env:
         return from_env
-    return (SECRETS_DIR / f"{role}.pw").read_text(encoding="utf-8").strip()
+    файл = SECRETS_DIR / f"{role}.pw"
+    if not файл.is_file():
+        raise RuntimeError(
+            f"не найден пароль роли {role}: ожидался файл {файл}. Хранилище искали в "
+            + ", ".join(str(к) for к in ВОЗМОЖНЫЕ_КОРНИ)
+            + ". Укажите каталог переменной GIS_DB_ROOT — в нём должны быть "
+            "secrets, raster, backup"
+        )
+    return файл.read_text(encoding="utf-8").strip()
 
 
 def url(role: str = "gis_read") -> str:
