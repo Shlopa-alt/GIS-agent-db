@@ -16,11 +16,7 @@ psycopg = pytest.importorskip("psycopg")
 from gisdb import db
 
 
-def соединение(роль: str):
-    try:
-        return db.connect(роль, connect_timeout=5)
-    except Exception as беда:                      # база не поднята — не наш случай
-        pytest.skip(f"база недоступна ({роль}): {беда}")
+from conftest import соединение  # noqa: E402  — одна попытка на весь прогон
 
 
 @pytest.fixture
@@ -164,3 +160,26 @@ def test_отклонение_с_причиной_записывается(че�
     assert человек.execute(
         "SELECT count(*) FROM meta.review WHERE reviewer = 'проба'"
     ).fetchone()[0] == 1
+
+
+def test_артефакт_прогона_пишется_с_отпечатком(агент):
+    """Файл, произведённый прогоном, должен записываться вместе с хешем.
+
+    `runs.artifact` пустовала всё время работы базы: прогоны писали, из чего
+    сделаны, но не что из них вышло. Копия базы без записи о том, чем и когда
+    она сделана, доказательной силы не имеет — проверяем обе половины.
+    """
+    from pathlib import Path
+
+    from gisdb import db_ingest as ingest
+
+    прогон = агент.execute(
+        "INSERT INTO runs.run (script, note) VALUES ('проба', 'проба') RETURNING id"
+    ).fetchone()[0]
+    хеш = ingest.add_artifact(агент, прогон, Path(__file__), "проба",
+                              "этот же файл проверки")
+    путь, записанный = агент.execute(
+        "SELECT path, checksum FROM runs.artifact WHERE run_id = %s", (прогон,)
+    ).fetchone()
+    assert записанный == хеш == ingest.checksum(Path(__file__))
+    assert путь.startswith("проект:/") and ":" in путь, "путь без буквы диска"

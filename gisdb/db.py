@@ -66,6 +66,21 @@ BACKUP_DIR: Path = ROOT / "backup"
 SCHEMAS: tuple[str, ...] = ("data", "meta", "runs", "kb", "bridge", "staging")
 
 
+def утилита(имя: str) -> Path:
+    """Путь к программе Postgres (`pg_dump`, `pg_restore`, `psql`).
+
+    Сервер лежит внутри хранилища (`pg18/bin`), но номер версии в имени
+    каталога меняется с каждым обновлением, поэтому ищем по образцу, а не по
+    строке. Сервера в хранилище нет — возвращаем просто имя: на сервере
+    организации Postgres ставится системно и утилиты лежат в `PATH`.
+    """
+    for каталог in sorted(ROOT.glob("pg*/bin"), reverse=True):
+        for файл in (каталог / f"{имя}.exe", каталог / имя):
+            if файл.is_file():
+                return файл
+    return Path(имя)
+
+
 def password(role: str) -> str:
     """Пароль роли: из переменной окружения, иначе из файла секретов."""
     from_env = os.environ.get(f"GIS_DB_PASSWORD_{role.upper()}")

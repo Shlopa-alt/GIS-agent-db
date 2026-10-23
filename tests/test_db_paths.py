@@ -54,3 +54,18 @@ def test_ссылка_на_файл_проекта_без_буквы_диска(
     ссылка = db.store_ref(db.PROJECT_ROOT / "db" / "migrate.py")
     assert ссылка == "проект:/db/migrate.py"
     assert db.store_path(ссылка) == db.PROJECT_ROOT / "db/migrate.py"
+
+
+def test_утилита_находится_по_образцу_а_не_по_версии(tmp_path, monkeypatch):
+    """`pg18` в пути — та же мина, что `F:/GIS-DB`: номер версии меняется."""
+    bin_ = tmp_path / "pg19" / "bin"
+    bin_.mkdir(parents=True)
+    (bin_ / "pg_dump.exe").write_text("", encoding="utf-8")
+    monkeypatch.setattr(db, "ROOT", tmp_path)
+    assert db.утилита("pg_dump") == bin_ / "pg_dump.exe"
+
+
+def test_утилиты_нет_в_хранилище_берётся_из_пути(tmp_path, monkeypatch):
+    """На сервере организации Postgres ставится системно — имени достаточно."""
+    monkeypatch.setattr(db, "ROOT", tmp_path)
+    assert db.утилита("pg_dump") == Path("pg_dump")

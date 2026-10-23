@@ -22,8 +22,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import psycopg
 
 from gisdb import db
+from gisdb import db_ingest as ingest
 
-BIN = Path(os.environ.get("GIS_DB_BIN", db.ROOT / "pg18" / "bin"))
+СКРИПТ = "db/restore_check.py"
+
+
+def программа(имя: str) -> Path:
+    """Утилита Postgres: переменная сильнее, иначе поиск внутри хранилища."""
+    задан = os.environ.get("GIS_DB_BIN")
+    return Path(задан) / имя if задан else db.утилита(имя)
 # Имя латиницей: имя базы уходит в psql через командную строку, а там
 # кириллица теряется в кодировке консоли Windows.
 ПРОВЕРОЧНАЯ = f"{db.DBNAME}_restore_check"
@@ -60,8 +67,8 @@ def расшифровать(поток: bytes) -> str:
     return поток.decode("utf-8", "replace")
 
 
-def запуск(программа: str, *аргументы: str) -> tuple[int, str]:
-    команда = [str(BIN / программа), "-h", db.HOST, "-p", str(db.PORT),
+def запуск(имя: str, *аргументы: str) -> tuple[int, str]:
+    команда = [str(программа(имя)), "-h", db.HOST, "-p", str(db.PORT),
                "-U", "gisadmin", *аргументы]
     готово = subprocess.run(команда, env=окружение(), capture_output=True)
     return готово.returncode, расшифровать(готово.stderr)
@@ -129,6 +136,37 @@ def прирост(рабочая: psycopg.Connection, копия: psycopg.Conne
     return None if старых != в_копии else старых
 
 
+def отметить_проверку(дамп: Path, расхождений: int, наросло: int,
+                      своя_срид: int, нет_ролей: list[str], плохо: bool) -> None:
+    """Записать итог проверки в рабочую базу: иначе он живёт только в консоли.
+
+    Проверенная копия отличается от непроверенной только записью о проверке.
+    Дамп идёт входом прогона вместе с хешем — так видно не «копию проверяли», а
+    «проверяли вот эту копию»; тот же хеш стоит в артефакте прогона, сделавшего
+    её, и два отпечатка сходятся.
+
+    Прогон считается успешным, даже если копия не воспроизвела базу: успешна
+    сама проверка, а её вывод — в метриках и примечании.
+    """
+    итог = "копия воспроизводит базу" if not плохо else "копия НЕ воспроизводит базу"
+    try:
+        with db.connect("gis_agent") as conn:
+            with ingest.run(conn, script=СКРИПТ,
+                            note=f"проверка копии {дамп.name}: {итог}") as run_id:
+                ingest.add_input(conn, run_id, дамп, kind="копия базы")
+                ingest.add_metric(conn, run_id, "таблиц с расхождением", расхождений)
+                ingest.add_metric(conn, run_id, "таблиц приросло после снимка", наросло)
+                ingest.add_metric(conn, run_id, "своя система координат в копии",
+                                  1 if своя_срид else 0)
+                ingest.add_metric(conn, run_id, "ролей не хватает", len(нет_ролей))
+                ingest.add_metric(conn, run_id, "копия воспроизводит базу",
+                                  0 if плохо else 1)
+                conn.commit()
+        print(f"записано в журнал прогонов: #{run_id}")
+    except Exception as сбой:                                  # noqa: BLE001
+        print(f"проверка выполнена, но в журнал не записана: {сбой}")
+
+
 def последний_дамп() -> Path:
     дампы = sorted(db.BACKUP_DIR.glob(f"{db.DBNAME}_*.dump"))
     if not дампы:
@@ -150,17 +188,13 @@ def main(argv: list[str]) -> int:
     print(f"поднимаю {ПРОВЕРОЧНАЯ}", flush=True)
 
     try:
-        for шаг, аргументы in (
-            ("расширения", ("-d", ПРОВЕРОЧНАЯ, "-c",
-                            "CREATE EXTENSION postgis; CREATE EXTENSION postgis_raster;")),
-            ("система координат", ("-d", ПРОВЕРОЧНАЯ, "-v", "ON_ERROR_STOP=1",
-                                   "-f", str(Path(__file__).parent / "sql" / "004_srid.sql"))),
-        ):
-            код, жалобы = запуск("psql", *аргументы)
-            if код:
-                print(f"{шаг}: сбой\n{жалобы[:600]}")
-                return 1
-            print(f"{шаг}: готово", flush=True)
+        код, жалобы = запуск(
+            "psql", "-d", ПРОВЕРОЧНАЯ, "-c",
+            "CREATE EXTENSION postgis; CREATE EXTENSION postgis_raster;")
+        if код:
+            print(f"расширения: сбой\n{жалобы[:600]}")
+            return 1
+        print("расширения: готово", flush=True)
 
         код, жалобы = запуск("pg_restore", "-d", ПРОВЕРОЧНАЯ, "--no-owner",
                              "-j", "4", str(дамп))
@@ -169,7 +203,20 @@ def main(argv: list[str]) -> int:
             # молчать об этом нельзя: пусть остаётся в выводе.
             print(f"pg_restore вернул {код}; первые замечания:\n"
                   + "\n".join(жалобы.splitlines()[:5]), flush=True)
-        print("восстановление завершено, сверяю количества", flush=True)
+        print("восстановление завершено", flush=True)
+
+        # Своя система координат накатывается ПОСЛЕ восстановления, а не до.
+        # Строка 990018 в дампе есть — `spatial_ref_sys` принадлежит PostGIS,
+        # но добавленная нами строка в выгрузку попадает, — и накат до
+        # восстановления ломал COPY этой таблицы на уникальном ключе. Сам файл
+        # идемпотентен (DELETE, затем INSERT), поэтому здесь он не «починка», а
+        # страховка: копия, снятая до появления 004_srid.sql, тоже развернётся.
+        код, жалобы = запуск("psql", "-d", ПРОВЕРОЧНАЯ, "-v", "ON_ERROR_STOP=1",
+                             "-f", str(Path(__file__).parent / "sql" / "004_srid.sql"))
+        if код:
+            print(f"система координат: сбой\n{жалобы[:600]}")
+            return 1
+        print("система координат: готово, сверяю количества", flush=True)
 
         рабочая, копия = соединение(db.DBNAME), соединение(ПРОВЕРОЧНАЯ)
         было, стало = количества(рабочая), количества(копия)
@@ -205,9 +252,10 @@ def main(argv: list[str]) -> int:
         print(f"роли в {роли[-1].name if роли else 'файле ролей'}: "
               + ("все на месте" if not нет_ролей else "НЕ ХВАТАЕТ " + ", ".join(нет_ролей)))
 
-        плохо = расхождений or not своя_срид or нет_ролей
+        плохо = bool(расхождений or not своя_срид or нет_ролей)
         print("\nитог: " + ("копия воспроизводит базу" if not плохо
                             else "копия НЕ воспроизводит базу — разбираться"))
+        отметить_проверку(дамп, расхождений, наросло, своя_срид, нет_ролей, плохо)
         return 1 if плохо else 0
     finally:
         if "--оставить" in argv:

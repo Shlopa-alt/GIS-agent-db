@@ -132,6 +132,32 @@ def add_input(conn: psycopg.Connection, run_id: int, path: Path, kind: str = "ф
     return хеш
 
 
+def add_artifact(
+    conn: psycopg.Connection,
+    run_id: int,
+    path: Path,
+    kind: str,
+    note: str | None = None,
+) -> str:
+    """Записать файл, произведённый прогоном, вместе с хешем; хеш вернуть.
+
+    Зеркало `add_input`: тот отвечает на вопрос «из чего это сделано», этот —
+    «что из этого вышло». Без второй половины журнал обрывается на полпути:
+    файл копии или выгрузки лежит на диске, а чем и когда он создан, знает
+    только его имя.
+
+    Хеш считается здесь же: копия без отпечатка недоказуема — по ней нельзя
+    сказать, та ли это копия, которую проверяли на восстановление.
+    """
+    хеш = checksum(path)
+    conn.execute(
+        """INSERT INTO runs.artifact (run_id, kind, path, checksum, note)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (run_id, kind, db.store_ref(path), хеш, note),
+    )
+    return хеш
+
+
 def add_metric(conn: psycopg.Connection, run_id: int, name: str, value: float) -> None:
     conn.execute(
         "INSERT INTO runs.metric (run_id, name, value) VALUES (%s, %s, %s)",
