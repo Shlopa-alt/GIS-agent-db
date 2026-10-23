@@ -13,6 +13,10 @@
   header a { color: #f3efe8; text-decoration: none; border-bottom: 1px solid transparent; }
   header a:hover { border-color: #c9a86a; }
   header .кто { margin-left: auto; opacity: .7; font-size: 13px; }
+  /* Выход — действие, а не переход: отправляется формой, но выглядеть должен
+     ссылкой, иначе в шапке вырастает кнопка размером с заголовок. */
+  header .как-ссылка { background: none; border: 0; padding: 0; cursor: pointer;
+                       color: #f3efe8; font: inherit; text-decoration: underline; }
   main { max-width: 1060px; margin: 0 auto; padding: 22px 20px 60px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   h2 { font-size: 17px; margin: 26px 0 8px; }
@@ -60,7 +64,11 @@
   <strong>Панель подтверждений</strong>
   <a href="/">Очереди</a>
   <a href="/журнал">Журнал решений</a>
-  <span class="кто">{% if кто %}проверяющий: {{ кто }} · <a href="/вход">сменить</a>{% endif %}</span>
+  <span class="кто">{% if кто %}{{ кто }}{% if может_решать is defined and not может_решать %}
+    · только чтение{% endif %} ·
+    <form method="post" action="/выход" style="display:inline">
+      <button type="submit" class="как-ссылка">выйти</button>
+    </form>{% endif %}</span>
 </header>
 <main>
 {% block content %}{% endblock %}

@@ -12,8 +12,11 @@ pytest.importorskip("jinja2")
 
 from fastapi.testclient import TestClient
 
+from urllib.parse import unquote
+
 from gisdb import db, panel
 from gisdb.panel import queries as q
+from gisdb.panel import сеансы
 
 
 from conftest import соединение  # noqa: E402  — одна попытка на весь прогон
@@ -29,8 +32,18 @@ def человек():
 
 @pytest.fixture
 def клиент():
+    """Клиент с открытым сеансом: вход идёт тем же путём, что у человека.
+
+    Печенье вручную не подделать — в нём только случайный ключ, — поэтому
+    сеанс открывается настоящим паролем роли `gis_human` из хранилища.
+    """
     соединение("gis_human").close()                # база нужна и странице
-    return TestClient(panel.app, cookies={"reviewer": "%D0%9F%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0"})
+    клиент = TestClient(panel.app)
+    ответ = клиент.post("/вход", data={"имя": "gis_human",
+                                       "пароль": db.password("gis_human")},
+                        follow_redirects=False)
+    assert ответ.status_code == 303, "вход не удался: панель не открыть"
+    return клиент
 
 
 @pytest.mark.parametrize("ключ", list(q.ВИДЫ))
@@ -121,3 +134,70 @@ def test_кнопка_всей_очереди_берёт_все_черновик
                 data={"решение": "подтверждён", "отмечено": [str(один)]})
     assert дошло["номера"] == черновики                # с флагом — вся очередь
     assert дошло["комментарий"] == panel.ПАКЕТОМ       # пометка в журнал проверок
+
+
+# ----------------------------------------------------------------------- вход
+def test_без_сеанса_страницы_ведут_на_вход():
+    """Открытый порт без пароля больше не отдаёт ни очередь, ни журнал."""
+    соединение("gis_read").close()
+    гость = TestClient(panel.app)
+    for адрес in ("/", "/очередь/признаки", "/журнал"):
+        ответ = гость.get(адрес, follow_redirects=False)
+        assert ответ.status_code == 303, адрес
+        assert unquote(ответ.headers["location"]).startswith("/вход"), адрес
+
+
+def test_решение_без_сеанса_не_проходит():
+    """Главное: подписать решение, не войдя, нельзя — ни одним запросом."""
+    соединение("gis_read").close()
+    гость = TestClient(panel.app)
+    ответ = гость.post("/решение/признаки/1",
+                       data={"решение": "подтверждён"}, follow_redirects=False)
+    assert ответ.status_code == 303
+    assert unquote(ответ.headers["location"]).startswith("/вход")
+
+
+def test_неверный_пароль_сеанса_не_открывает():
+    соединение("gis_read").close()
+    гость = TestClient(panel.app)
+    ответ = гость.post("/вход", data={"имя": "gis_human", "пароль": "не тот"})
+    assert ответ.status_code == 200
+    assert "не подходят" in ответ.text
+    assert not гость.cookies.get(сеансы.ПЕЧЕНЬЕ), "сеанс не должен открыться"
+
+
+def test_подпись_берётся_из_учётной_записи_а_не_из_формы(клиент):
+    """Подписаться чужим именем нельзя: имя берётся из сеанса, не из запроса."""
+    страница = клиент.get("/")
+    assert страница.status_code == 200
+    assert "gis_human" in страница.text
+    assert 'name="кто"' not in страница.text, "имени подписи нет среди полей формы"
+
+
+def test_читатель_не_получает_кнопок_решения():
+    """Право вердикта проверяет база; кнопку, которая получит отказ, не даём."""
+    соединение("gis_read").close()
+    читатель = TestClient(panel.app)
+    ответ = читатель.post("/вход", data={"имя": "gis_read",
+                                         "пароль": db.password("gis_read")},
+                          follow_redirects=False)
+    if ответ.status_code != 303:
+        pytest.skip("роль gis_read не входит в панель на этой машине")
+    страница = читатель.get("/очередь/признаки")
+    assert страница.status_code == 200
+    assert "только чтение" in страница.text
+    assert "Подтвердить отмеченные" not in страница.text
+
+
+def test_выход_гасит_сеанс(клиент):
+    клиент.post("/выход", follow_redirects=False)
+    ответ = клиент.get("/", follow_redirects=False)
+    assert ответ.status_code == 303
+    assert unquote(ответ.headers["location"]).startswith("/вход")
+
+
+def test_истёкший_сеанс_просит_войти_заново(клиент, monkeypatch):
+    monkeypatch.setattr(сеансы, "СРОК", -1)          # всё, что есть, уже истекло
+    ответ = клиент.get("/", follow_redirects=False)
+    assert ответ.status_code == 303
+    assert "истёк" in unquote(ответ.headers["location"])

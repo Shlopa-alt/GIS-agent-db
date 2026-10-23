@@ -11,13 +11,14 @@ r"""Панель подтверждений: очередь черновиков
     python -m gisdb.panel                 — http://127.0.0.1:8765
     python -m gisdb.panel --порт 9000
 
-Про доступ честно: панель слушает только петлевой адрес и пароля не спрашивает.
-Имя в поле «проверяющий» — подпись под решением, а не вход в систему. На сервере
-с сетевым доступом перед ней должен стоять обычный вход по паролю, а роль
-`gis_human` — получить пароль каждого проверяющего отдельно.
+Вход: учётная запись проверяющего — роль базы с паролем, и пароль проверяется
+попыткой открыть соединение этой ролью. Дальше все запросы человека идут от его
+имени, подпись под решением берётся из учётной записи, а право вынести вердикт
+даёт членство в `gis_confirmer` — его проверяет триггер базы, а не эта страница.
+Подробности и причины — `gisdb/panel/сеансы.py`.
 
-В базу панель ходит ролью `gis_human`: те же права, что у агента, плюс право
-ставить «подтверждён». Суперпользователь для этого не нужен и опасен.
+Панель по-прежнему слушает только петлевой адрес. Теперь это не единственная
+защита, а вторая: открытый порт без пароля больше не отдаёт право подписи.
 """
 
 from __future__ import annotations
@@ -31,8 +32,11 @@ import jinja2
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+import psycopg
+
 from gisdb import db
 from gisdb.panel import queries as q
+from gisdb.panel import сеансы
 
 ШАБЛОНЫ = jinja2.Environment(
     loader=jinja2.FileSystemLoader(Path(__file__).parent / "templates"),
@@ -44,48 +48,89 @@ from gisdb.panel import queries as q
 app = FastAPI(title="Панель подтверждений")
 
 
-def показать(имя: str, **значения) -> HTMLResponse:
-    return HTMLResponse(ШАБЛОНЫ.get_template(имя).render(**значения))
+def показать(шаблон: str, **значения) -> HTMLResponse:
+    return HTMLResponse(ШАБЛОНЫ.get_template(шаблон).render(**значения))
 
-
-# Имя печенья — на латинице: протокол другого не принимает (http.cookies),
-# а само имя человека внутри неё кодируется процентами.
-ПЕЧЕНЬЕ = "reviewer"
 
 # Причина по умолчанию для решения по всей очереди: в журнале должно быть
 # видно, что карточки не открывались по одной.
 ПАКЕТОМ = "решение по всей очереди сразу, без чтения карточек по одной"
 
 
-def проверяющий(request: Request) -> str:
-    return unquote(request.cookies.get(ПЕЧЕНЬЕ, ""))
+def кто_вошёл(request: Request) -> сеансы.Сеанс:
+    """Сеанс запроса; не вошёл — `НеВошёл`, и страница ведёт на вход."""
+    return сеансы.сеанс(request.cookies.get(сеансы.ПЕЧЕНЬЕ))
 
 
-def соединение():
-    return db.connect("gis_human")
+def соединение(request: Request):
+    """Соединение от имени вошедшего, а не общей служебной ролью.
+
+    Отсюда и `confirmed_by`, и запрет вердикта читателю: права проверяет база
+    по роли соединения, и обойти её, подменив поле формы, нельзя.
+    """
+    с = кто_вошёл(request)
+    return db.connect(с.роль, пароль=с.пароль)
+
+
+def объяснить(ошибка: Exception) -> str:
+    """Отказ базы — словами, а не ответом 500.
+
+    Читатель без членства в `gis_confirmer` не получает кнопок решения, но
+    запрос можно послать и мимо страницы. Тогда отказывает база — правилом,
+    а не вежливостью, — и это правильный исход; неправильно было отвечать на
+    него пустой пятисоткой, из которой человек не узнаёт, что произошло.
+    """
+    if isinstance(ошибка, psycopg.errors.InsufficientPrivilege):
+        return ("база отказала: у этой учётной записи нет права менять запись. "
+                "Решения выносит тот, кто входит в gis_confirmer")
+    if isinstance(ошибка, psycopg.Error):
+        # Текст триггера писался для человека — его и показываем, без следа.
+        return f"база отказала: {str(ошибка).strip().splitlines()[0]}"
+    return str(ошибка)
+
+
+@app.exception_handler(сеансы.НеВошёл)
+def не_вошёл(request: Request, беда: сеансы.НеВошёл):
+    # Причина уходит в адрес, чтобы страница входа объяснила, почему человек
+    # снова здесь: истёкший сеанс иначе выглядит поломкой.
+    return RedirectResponse(f"/вход?причина={quote(str(беда))}", status_code=303)
 
 
 # ------------------------------------------------------------------- страницы
 @app.get("/", response_class=HTMLResponse)
 def главная(request: Request):
-    кто = проверяющий(request)
-    if not кто:
-        return RedirectResponse("/вход", status_code=303)
-    with соединение() as conn:
-        return показать("index.html", кто=кто, сводка=q.сводка(conn),
-                        оценка=q.оценка_моделей(conn), журнал=q.журнал(conn, 8))
+    с = кто_вошёл(request)
+    with соединение(request) as conn:
+        return показать("index.html", кто=с.роль, может_решать=с.может_решать,
+                        сводка=q.сводка(conn), оценка=q.оценка_моделей(conn),
+                        журнал=q.журнал(conn, 8))
 
 
 @app.get("/вход", response_class=HTMLResponse)
-def вход():
-    return показать("login.html")
+def вход(причина: str = ""):
+    return показать("login.html", причина=причина)
 
 
 @app.post("/вход")
-def войти(имя: str = Form(...)):
+def войти(имя: str = Form(...), пароль: str = Form(...)):
+    try:
+        ключ = сеансы.войти(имя, пароль)
+    except сеансы.НеВошёл as беда:
+        return показать("login.html", причина=str(беда), имя=имя.strip())
     ответ = RedirectResponse("/", status_code=303)
-    # Подпись под решениями; хранится год, чтобы не вводить её каждый день.
-    ответ.set_cookie(ПЕЧЕНЬЕ, quote(имя.strip()), max_age=365 * 24 * 3600)
+    # Печенье хранит только ключ сеанса: ни имени, ни пароля в нём нет.
+    # httponly — чтобы ключ не читался со страницы, samesite — чтобы решение
+    # нельзя было вынести переходом с чужого сайта.
+    ответ.set_cookie(сеансы.ПЕЧЕНЬЕ, ключ, max_age=сеансы.СРОК,
+                     httponly=True, samesite="strict")
+    return ответ
+
+
+@app.post("/выход")
+def выйти(request: Request):
+    сеансы.выйти(request.cookies.get(сеансы.ПЕЧЕНЬЕ))
+    ответ = RedirectResponse("/вход", status_code=303)
+    ответ.delete_cookie(сеансы.ПЕЧЕНЬЕ)
     return ответ
 
 
@@ -94,21 +139,24 @@ def войти(имя: str = Form(...)):
 @app.get("/очередь/{kind}", response_class=HTMLResponse)
 def очередь(kind: str, request: Request, статус: str = "черновик"):
     вид = q.ВИДЫ[kind]
-    with соединение() as conn:
-        return показать("queue.html", кто=проверяющий(request), вид=вид,
-                        статус=статус, статусы=q.СТАТУСЫ,
+    с = кто_вошёл(request)
+    with соединение(request) as conn:
+        return показать("queue.html", кто=с.роль, может_решать=с.может_решать,
+                        вид=вид, статус=статус, статусы=q.СТАТУСЫ,
                         записи=q.очередь(conn, вид, статус))
 
 
 @app.get("/карточка/{kind}/{num}", response_class=HTMLResponse)
 def карточка(kind: str, num: int, request: Request):
     вид, номер = q.ВИДЫ[kind], num
-    with соединение() as conn:
+    с = кто_вошёл(request)
+    with соединение(request) as conn:
         данные = q.карточка(conn, вид, номер)
         осталось = len(q.очередь(conn, вид, "черновик"))
     return показать(
-        f"card_{kind}.html", кто=проверяющий(request), вид=вид, к=данные,
-        подписи=q.ПОДПИСИ, осталось=осталось, открыто=int(time.time()),
+        f"card_{kind}.html", кто=с.роль, может_решать=с.может_решать,
+        вид=вид, к=данные, подписи=q.ПОДПИСИ, осталось=осталось,
+        открыто=int(time.time()),
     )
 
 
@@ -116,7 +164,7 @@ def карточка(kind: str, num: int, request: Request):
 async def решение(kind: str, num: int, request: Request):
     вид, номер = q.ВИДЫ[kind], num
     форма = await request.form()
-    кто = проверяющий(request) or "не подписан"
+    кто = кто_вошёл(request).роль
     выбор = форма.get("решение", "черновик")
     комментарий = (форма.get("комментарий") or "").strip()
     открыто = int(форма.get("открыто") or 0)
@@ -124,14 +172,15 @@ async def решение(kind: str, num: int, request: Request):
 
     правки = {п: форма.get(п, "") for п in вид.поля if п in форма or п == "allows_redistribution"}
 
-    with соединение() as conn:
+    with соединение(request) as conn:
         номера = [номер]
         if kind == "признаки" and форма.get("все_сборки") == "да":
             номера = q.паспорта_кода(conn, номер) or [номер]
         try:
             q.применить(conn, вид, номера, выбор, кто, правки, комментарий, секунды)
-        except ValueError as ошибка:
-            return показать("error.html", кто=кто, сообщение=str(ошибка),
+        except (ValueError, psycopg.Error) as ошибка:
+            conn.rollback()
+            return показать("error.html", кто=кто, сообщение=объяснить(ошибка),
                             назад=f"/карточка/{kind}/{номер}")
         дальше = q.следующий(conn, вид, номер)
 
@@ -154,7 +203,7 @@ async def пакет(kind: str, request: Request):
     """Решение по нескольким черновикам сразу — из списка очереди."""
     вид = q.ВИДЫ[kind]
     форма = await request.form()
-    кто = проверяющий(request) or "не подписан"
+    кто = кто_вошёл(request).роль
     выбор = форма.get("решение", "подтверждён")
     комментарий = (форма.get("комментарий") or "").strip()
     отмечено = [int(з) for з in форма.getlist("отмечено")]
@@ -162,7 +211,7 @@ async def пакет(kind: str, request: Request):
     # ушло бы и с обычным «подтвердить отмеченные».
     вся_очередь = request.query_params.get("вся_очередь") == "да"
 
-    with соединение() as conn:
+    with соединение(request) as conn:
         if вся_очередь:
             # Решение по всей очереди, а не по отмеченному: в журнал проверок
             # ложится пометка, что карточки по одной не читались — иначе потом
@@ -176,16 +225,18 @@ async def пакет(kind: str, request: Request):
             return RedirectResponse(f"/очередь/{kind}", status_code=303)
         try:
             q.применить(conn, вид, номера, выбор, кто, {}, комментарий)
-        except ValueError as ошибка:
-            return показать("error.html", кто=кто, сообщение=str(ошибка),
+        except (ValueError, psycopg.Error) as ошибка:
+            conn.rollback()
+            return показать("error.html", кто=кто, сообщение=объяснить(ошибка),
                             назад=f"/очередь/{kind}")
     return RedirectResponse(f"/очередь/{kind}", status_code=303)
 
 
 @app.get("/журнал", response_class=HTMLResponse)
 def журнал(request: Request, сколько: int = 200):
-    with соединение() as conn:
-        return показать("journal.html", кто=проверяющий(request),
+    с = кто_вошёл(request)
+    with соединение(request) as conn:
+        return показать("journal.html", кто=с.роль, может_решать=с.может_решать,
                         записи=q.журнал(conn, сколько),
                         оценка=q.оценка_моделей(conn))
 

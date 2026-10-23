@@ -1,12 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Кто проверяет</h1>
-<p class="подзаголовок">Имя ставится подписью под каждым решением: в паспорте
-(«подтвердил») и в журнале решений. Это подпись, а не вход в систему — панель
-работает только на этой машине.</p>
+<h1>Вход</h1>
+<p class="подзаголовок">Учётная запись — это роль базы данных. Под её именем
+идут все запросы и ставится подпись под решением: в паспорте («подтвердил») и в
+журнале решений. Право вынести вердикт даёт членство в <code>gis_confirmer</code>
+— его проверяет сама база, а не эта страница.</p>
+{% if причина %}
+<p class="метка внимание">{{ причина }}</p>
+{% endif %}
 <form class="решение" method="post" action="/вход">
-  <label for="имя">Фамилия и инициалы</label>
-  <input type="text" id="имя" name="имя" required autofocus placeholder="Иванов И. И.">
-  <div class="кнопки"><button class="принять" type="submit">Начать работу</button></div>
+  <label for="имя">Учётная запись</label>
+  <input type="text" id="имя" name="имя" required autofocus
+         autocomplete="username" value="{{ имя or '' }}" placeholder="gis_human">
+  <label for="пароль">Пароль</label>
+  <input type="password" id="пароль" name="пароль" required
+         autocomplete="current-password">
+  <div class="кнопки"><button class="принять" type="submit">Войти</button></div>
 </form>
+<p class="приглушённо мелко">Сеанс живёт 12 часов и гаснет при остановке
+панели. Пароль нигде не сохраняется: он нужен, чтобы открывать соединение к
+базе от вашего имени, и живёт только в памяти работающей панели.</p>
 {% endblock %}

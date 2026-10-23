@@ -107,11 +107,18 @@ def engine(role: str = "gis_read", **kwargs) -> sa.Engine:
     return sa.create_engine(url(role), **kwargs)
 
 
-def connect(role: str = "gis_agent", **kwargs) -> psycopg.Connection:
-    """Прямое подключение psycopg — нужно для COPY и явных транзакций."""
+def connect(role: str = "gis_agent", пароль: str | None = None,
+            **kwargs) -> psycopg.Connection:
+    """Прямое подключение psycopg — нужно для COPY и явных транзакций.
+
+    Пароль обычно берётся из хранилища секретов. Явно он передаётся там, где
+    роль не наша служебная, а учётная запись проверяющего: её пароль знает
+    только человек, и в хранилище его нет.
+    """
     return psycopg.connect(
         host=HOST, port=PORT, dbname=DBNAME,
-        user=role, password=password(role), **kwargs,
+        user=role, password=пароль if пароль is not None else password(role),
+        **kwargs,
     )
 
 
