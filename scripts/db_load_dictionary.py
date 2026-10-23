@@ -69,18 +69,21 @@ def разобрать(коды: dict[str, str | None]) -> list[tuple[str, str, 
 
 
 def записать(conn, run_id: int, ряды, ссылка: str, отпечаток: str) -> int:
-    conn.executemany(
-        """INSERT INTO meta.feature_term
-               (code, group_code, technical, geo_note, source_ref, source_hash, run_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (code) DO UPDATE SET
-               group_code = EXCLUDED.group_code, technical = EXCLUDED.technical,
-               geo_note = EXCLUDED.geo_note, source_ref = EXCLUDED.source_ref,
-               source_hash = EXCLUDED.source_hash, run_id = EXCLUDED.run_id,
-               loaded_at = now()""",
-        [(код, группа, описание, формулировка, ссылка, отпечаток, run_id)
-         for код, группа, описание, формулировка in ряды],
-    )
+    # Пакетная вставка идёт через курсор: у соединения psycopg такого метода
+    # нет, а 149 отдельных вставок — 149 обменов с сервером вместо одного.
+    with conn.cursor() as курсор:
+        курсор.executemany(
+            """INSERT INTO meta.feature_term
+                   (code, group_code, technical, geo_note, source_ref, source_hash, run_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (code) DO UPDATE SET
+                   group_code = EXCLUDED.group_code, technical = EXCLUDED.technical,
+                   geo_note = EXCLUDED.geo_note, source_ref = EXCLUDED.source_ref,
+                   source_hash = EXCLUDED.source_hash, run_id = EXCLUDED.run_id,
+                   loaded_at = now()""",
+            [(код, группа, описание, формулировка, ссылка, отпечаток, run_id)
+             for код, группа, описание, формулировка in ряды],
+        )
     return len(ряды)
 
 
