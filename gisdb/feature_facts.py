@@ -12,10 +12,15 @@
 
 from __future__ import annotations
 
-from gisdb.project import подключить
+# Словарь признаков читается из базы (`meta.feature_term`, миграция 016), а не
+# из репозитория прогноза. Раньше здесь стоял импорт `src.feature_dict`, и из-за
+# него база, отданная другому, не открывала даже карточку признака. Снимок
+# словаря обновляет `scripts/db_load_dictionary.py` — единственное место, где
+# проект ещё нужен.
 
-подключить()                       # словарь признаков живёт в проекте
-from src.feature_dict import classify, describe      # noqa: E402
+#: Так помечается код, которого в снимке словаря нет. Пометка видимая: пустое
+#: описание человек спишет на недоделку страницы, а не на пробел в данных.
+НЕТ_ОПИСАНИЯ = "описание не загружено: см. scripts/db_load_dictionary.py"
 
 # Столбцы выборки в том порядке, в каком идут в запросе.
 СТОЛБЦЫ: tuple[str, ...] = (
@@ -23,6 +28,7 @@ from src.feature_dict import classify, describe      # noqa: E402
     "coverage_frac", "missing_frac", "circularity", "transferability",
     "footprint_dependent", "aggregation_rule", "geological_meaning",
     "kb_reference", "model", "status", "importance_checked",
+    "техническое_из_словаря", "группа_из_словаря",
 )
 
 ЗАПРОС = """
@@ -30,11 +36,13 @@ SELECT f.id, f.code, f.group_code, f.definition->>'сборка' AS сборка
        g.code AS сетка, t.title AS территория,
        p.coverage_frac, p.missing_frac, p.circularity, p.transferability,
        p.footprint_dependent, p.aggregation_rule, p.geological_meaning,
-       p.kb_reference, p.model, p.status, p.importance_checked
+       p.kb_reference, p.model, p.status, p.importance_checked,
+       т.technical, т.group_code
   FROM meta.feature_passport p
   JOIN data.feature f ON f.id = p.feature_id
   LEFT JOIN data.grid g ON g.code = f.definition->>'сетка'
   LEFT JOIN data.territory t ON t.id = g.territory_id
+  LEFT JOIN meta.feature_term т ON т.code = f.code
  {где}
  ORDER BY f.code, f.id
 """
@@ -63,11 +71,11 @@ def факты(conn, строка: dict) -> dict:
     """Собрать всё, что база знает о признаке, — вход задачи для модели."""
     источники = conn.execute(ИСТОЧНИКИ, (строка["id"],)).fetchall()
     n, мин, среднее, макс, ско = conn.execute(СТАТИСТИКА, (строка["id"],)).fetchone()
-    группа = строка["group_code"] or classify(строка["code"])
+    группа = строка["group_code"] or строка["группа_из_словаря"]
     return {
         **строка,
         "группа": группа,
-        "техническое": describe(строка["code"], "ter" if группа == "dem" else группа),
+        "техническое": строка["техническое_из_словаря"] or НЕТ_ОПИСАНИЯ,
         "источники": [
             {"слой": t, "поставщик": p, "разрешение_м": r, "формат": ф, "метод": м}
             for t, p, r, ф, м in источники
