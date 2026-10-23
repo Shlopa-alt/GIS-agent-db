@@ -42,10 +42,17 @@ def checksum(path: Path, chunk: int = 1 << 20) -> str:
 
 
 def git_commit() -> str | None:
-    """Текущий коммит репозитория — версия кода, породившего данные."""
+    """Текущий коммит репозитория — версия кода, породившего данные.
+
+    Каталог задаётся явно, а не берётся текущий: по расписанию процесс
+    запускается из системного каталога, где никакого репозитория нет, — и
+    версия кода тихо пропадала бы из журнала именно у тех прогонов, за которыми
+    никто не смотрит.
+    """
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ["git", "rev-parse", "HEAD"], cwd=db.PROJECT_ROOT,
+            capture_output=True, text=True, check=True,
         )
         return out.stdout.strip()
     except Exception:
