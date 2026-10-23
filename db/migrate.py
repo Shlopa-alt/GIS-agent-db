@@ -61,10 +61,17 @@ def применённые(conn) -> dict[str, str]:
 
 
 def завести_учёт(conn) -> bool:
-    """Создать таблицу учёта, если её нет. Возвращает, пришлось ли заводить."""
+    """Создать таблицу учёта, если её нет. Возвращает, пришлось ли заводить.
+
+    Схема `meta` создаётся здесь же. Учёт живёт в ней, а появляется она только
+    в первой миграции — на живой базе это незаметно, а на пустой накат падал на
+    первом же шаге: «schema meta does not exist». Сам файл учёта не трогаем, его
+    отпечаток уже записан в базе, и правка задним числом остановила бы накат.
+    """
     if conn.execute(ЕСТЬ_ТАБЛИЦА).fetchone()[0]:
         return False
     путь = ПАПКА / УЧЁТ
+    conn.execute("CREATE SCHEMA IF NOT EXISTS meta")
     conn.execute(путь.read_text(encoding="utf-8"))
     conn.execute(
         """INSERT INTO meta.migration (filename, checksum, note)

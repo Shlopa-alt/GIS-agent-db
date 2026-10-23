@@ -16,11 +16,7 @@ from gisdb import db, panel
 from gisdb.panel import queries as q
 
 
-def соединение(роль: str):
-    try:
-        return db.connect(роль, connect_timeout=5)
-    except Exception as беда:
-        pytest.skip(f"база недоступна ({роль}): {беда}")
+from conftest import соединение  # noqa: E402  — одна попытка на весь прогон
 
 
 @pytest.fixture

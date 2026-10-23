@@ -1,0 +1,4 @@
+# Проверки. Без базы проходит часть, не требующая её (см. tests/conftest.py).
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27

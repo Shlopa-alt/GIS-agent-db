@@ -1,0 +1,110 @@
+# Непрерывная проверка: установка базы с нуля и прогон всех проверок.
+#
+# Второе важнее первого. Проверки и так запускаются на рабочей машине, а вот
+# «ставится ли база с нуля» там не проверить ничем: живая база накапливалась
+# месяц, роли завели руками, миграции 001-014 зарегистрировали задним числом.
+# Здесь каждый раз поднимается пустой Postgres, создаются роли, накатываются
+# все миграции по порядку и прогоняются проверки — то есть проверяется ровно
+# то, что будет делать покупатель при установке.
+#
+# Пароли здесь заведомо негодные: это одноразовый контейнер, живущий минуты.
+# Пароли рабочей базы лежат в хранилище (secrets/*.pw) и в репозиторий не
+# попадают.
+
+name: проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  без-базы:
+    name: без базы
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: проверки, не требующие базы
+        # База недоступна: часть проверок пропускается — так репозиторий
+        # собирается на машине без базы. Недоступность выясняется один раз
+        # (tests/conftest.py), иначе прогон упирался бы в отказы по 10 секунд.
+        env:
+          GIS_DB_HOST: 127.0.0.1
+          GIS_DB_PORT: "1"
+        run: pytest tests -q
+
+  с-базой:
+    name: установка с нуля и все проверки
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_PASSWORD: ci-postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GIS_DB_HOST: 127.0.0.1
+      GIS_DB_PORT: "5432"
+      GIS_DB_NAME: gis_au_u
+      GIS_DB_ROOT: /tmp/gis-db-ci
+      GIS_DB_PASSWORD_GISADMIN: ci-gisadmin
+      GIS_DB_PASSWORD_GIS_AGENT: ci-agent
+      GIS_DB_PASSWORD_GIS_READ: ci-read
+      GIS_DB_PASSWORD_GIS_HUMAN: ci-human
+      PGPASSWORD: ci-postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: роли и база
+        # Роли заводятся до миграций: 003 выдаёт им права, 007 и 011 создают
+        # ещё две сами. На рабочей машине это делалось руками — здесь видно,
+        # чего именно установщику не хватает (задел волны 3).
+        run: |
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE gisadmin  LOGIN SUPERUSER PASSWORD 'ci-gisadmin';
+          CREATE ROLE gis_agent LOGIN PASSWORD 'ci-agent';
+          CREATE ROLE gis_read  LOGIN PASSWORD 'ci-read';
+          SQL
+          createdb -h 127.0.0.1 -U postgres -O gisadmin gis_au_u
+
+      - name: накат миграций по порядку
+        run: python db/migrate.py
+
+      - name: учёт миграций сошёлся
+        run: |
+          python db/migrate.py --состояние | tee учёт.txt
+          grep -q "ожидает: 0" учёт.txt
+
+      - name: повторный накат ничего не делает
+        # Идемпотентность: второй запуск обязан не найти работы. Иначе учёт
+        # миграций не учёт, а журнал пожеланий.
+        run: |
+          python db/migrate.py | tee повтор.txt
+          grep -q "применять нечего" повтор.txt
+
+      - name: пароль роли человека
+        # gis_human создаёт миграция 007, и создаёт без пароля — иначе пароль
+        # лежал бы в репозитории. Панели он нужен, поэтому задаётся после.
+        run: |
+          psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE gis_human LOGIN PASSWORD 'ci-human'"
+
+      - name: все проверки
+        run: pytest tests -q
