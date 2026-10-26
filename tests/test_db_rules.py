@@ -99,6 +99,61 @@ def test_агент_не_отклоняет(агент, таблица, ключ
         )
 
 
+@pytest.mark.parametrize("таблица, ключ", [
+    ("meta.license", "id"),
+    ("meta.feature_passport", "feature_id"),
+    ("kb.concept", "id"),
+])
+def test_агент_не_снимает_вердикт(агент, таблица, ключ):
+    """Снятие вердикта — тоже вердикт (миграция 019).
+
+    Прежний запрет смотрел только на новое значение статуса, и переход
+    «подтверждён» → «черновик» выглядел по нему безобидным. Агент возвращал
+    подтверждённую строку в черновик, подпись человека обнулялась тем же
+    триггером, а в `meta.review` не ложилось ничего: журнал ведёт панель, а
+    агент ходит мимо неё. Решение человека стиралось без следа.
+    """
+    if "TG_OP" not in агент.execute(
+        "SELECT pg_get_functiondef('meta.guard_confirmation'::regproc)"
+    ).fetchone()[0]:
+        pytest.skip("миграция 019_verdict_removal.sql не накатана")
+    номер = первый(
+        агент, f"SELECT {ключ} FROM {таблица} WHERE status = 'подтверждён' LIMIT 1")
+    with pytest.raises(psycopg.errors.RaiseException, match="снимает только человек"):
+        агент.execute(
+            f"UPDATE {таблица} SET status = 'черновик' WHERE {ключ} = %s", (номер,)
+        )
+
+
+def test_человек_возвращает_на_доработку(человек, monkeypatch):
+    """Законный путь снятия вердикта: человек, кнопка в панели, строка в журнале.
+
+    Он нужен не теоретически: 47 паспортов в базе описаны не локальной моделью,
+    и переписать их иначе нельзя — паспортизатор берёт только черновики.
+    """
+    from gisdb.panel import queries as q
+
+    номер = первый(
+        человек,
+        "SELECT feature_id FROM meta.feature_passport WHERE status = 'подтверждён' LIMIT 1")
+    monkeypatch.setattr(человек, "commit", lambda: None)
+
+    q.применить(человек, q.ВИДЫ["признаки"], [номер], "черновик", "проверка", {},
+                "описано не локальной моделью", 5)
+
+    статус, подпись = человек.execute(
+        "SELECT status, confirmed_by FROM meta.feature_passport WHERE feature_id = %s",
+        (номер,),
+    ).fetchone()
+    решение, причина = человек.execute(
+        """SELECT decision, comment FROM meta.review
+            WHERE object_kind = 'паспорт признака' AND object_id = %s
+            ORDER BY at DESC LIMIT 1""", (номер,)
+    ).fetchone()
+    assert (статус, подпись) == ("черновик", None), "вердикт не снят"
+    assert решение == "черновик" and причина, "возврат на доработку без причины в журнале"
+
+
 def test_человек_подтверждает_и_подписывается(человек):
     номер = первый(человек, "SELECT id FROM meta.license LIMIT 1")
     # Запись могла быть подтверждена человеком раньше — тогда подпись уже стоит
