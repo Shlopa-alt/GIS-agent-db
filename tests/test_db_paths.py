@@ -50,10 +50,21 @@ def test_пароль_из_переменной_окружения_файл_не
     assert db.password("gis_read") == "из-переменной"
 
 
-def test_ссылка_на_файл_проекта_без_буквы_диска():
-    ссылка = db.store_ref(db.PROJECT_ROOT / "db" / "migrate.py")
-    assert ссылка == "проект:/db/migrate.py"
-    assert db.store_path(ссылка) == db.PROJECT_ROOT / "db/migrate.py"
+def test_ссылка_на_файл_без_буквы_диска():
+    """Три корня, и каждый свой. Пока «проект» значил и репозиторий прогноза, и
+    репозиторий базы, слои ГИС Интегро записывались как `проект:/data/...`, а
+    читались из каталога базы, где данных нет: осмотр сборщика насчитал 33
+    пропавших слоя при 33 лежащих на месте.
+    """
+    свой = db.store_ref(db.PROJECT_ROOT / "db" / "migrate.py")
+    assert свой == "база:/db/migrate.py"
+    assert db.store_path(свой) == db.PROJECT_ROOT / "db/migrate.py"
+
+    данные = db.store_ref(db.КОРЕНЬ_ПРОЕКТА / "data" / "processed" / "dataset_v6.parquet")
+    assert данные == "проект:/data/processed/dataset_v6.parquet"
+    assert db.store_path(данные) == db.КОРЕНЬ_ПРОЕКТА / "data/processed/dataset_v6.parquet"
+
+    assert db.store_ref(db.ROOT / "backup" / "x.dump") == "хранилище:/backup/x.dump"
 
 
 def test_утилита_находится_по_образцу_а_не_по_версии(tmp_path, monkeypatch):
