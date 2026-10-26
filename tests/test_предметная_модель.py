@@ -155,3 +155,62 @@ def test_агент_не_подтверждает_критерий(агент):
         агент.execute(
             "UPDATE kb.concept SET status = 'подтверждён' WHERE code = %s", (КРИТЕРИЙ,)
         )
+
+
+# ---------------------------------------------------------------- панель
+# Место понятия в дереве ставит человек в панели, а не загрузчик: это
+# утверждение о предметной модели, и подпись под ним должна быть человеческой.
+def test_карточка_предлагает_только_допустимый_уровень_выше(человек):
+    """Правило уровней видно до отправки формы, а не отказом после неё."""
+    from gisdb.panel import queries as q
+
+    этапы = {к for (к,) in человек.execute(
+        "SELECT code FROM kb.concept WHERE kind = 'этап процесса'").fetchall()}
+    if not этапы:
+        pytest.skip("в базе нет ни одного этапа процесса")
+
+    фактор = человек.execute(
+        """SELECT id FROM kb.concept
+            WHERE kind = 'рудоконтролирующий фактор' ORDER BY code LIMIT 1"""
+    ).fetchone()[0]
+    карточка = q.карточка_понятия(человек, фактор)
+    assert set(карточка["возможные_выше"]) == этапы, "фактору предлагают не этапы"
+
+    этап = человек.execute(
+        "SELECT id FROM kb.concept WHERE kind = 'этап процесса' LIMIT 1").fetchone()[0]
+    assert q.карточка_понятия(человек, этап)["возможные_выше"] == [], \
+        "этап — верхний уровень, предлагать ему нечего"
+
+
+def test_этап_фактору_ставит_человек_и_это_попадает_в_журнал(человек, monkeypatch):
+    """Правка места в дереве должна остаться в `meta.review` как «было → стало»."""
+    from gisdb.panel import queries as q
+
+    этап = человек.execute(
+        "SELECT code FROM kb.concept WHERE kind = 'этап процесса' ORDER BY code LIMIT 1"
+    ).fetchone()
+    if not этап:
+        pytest.skip("в базе нет ни одного этапа процесса")
+    фактор = человек.execute(
+        """SELECT id FROM kb.concept
+            WHERE kind = 'рудоконтролирующий фактор' ORDER BY code LIMIT 1"""
+    ).fetchone()[0]
+    # Решение проверяется внутри транзакции, которую откатит фикстура: строку
+    # журнала стереть нельзя, у роли нет такого права — и это правильно.
+    monkeypatch.setattr(человек, "commit", lambda: None)
+
+    q.применить(человек, q.ВИДЫ["понятия"], [фактор], "подтверждён", "проверка",
+                {"parent_code": этап[0]}, "", 5)
+
+    стало, = человек.execute(
+        "SELECT parent_code FROM kb.concept WHERE id = %s", (фактор,)).fetchone()
+    правка, = человек.execute(
+        """SELECT edited FROM meta.review
+            WHERE object_kind = 'понятие' AND object_id = %s
+            ORDER BY at DESC LIMIT 1""", (фактор,)).fetchone()
+    assert стало == этап[0]
+    # В журнале стоит человеческая подпись поля, а не имя столбца: решение
+    # читает человек, а `parent_code` ему ничего не говорит.
+    assert правка and q.ПОДПИСИ["parent_code"] in правка, \
+        f"правка дерева не попала в журнал: {правка}"
+    assert правка[q.ПОДПИСИ["parent_code"]]["стало"] == этап[0]

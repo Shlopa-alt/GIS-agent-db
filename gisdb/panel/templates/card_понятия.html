@@ -8,6 +8,10 @@
 
 <dl class="факты">
   <dt>Род понятия</dt><dd>{{ к.kind }}</dd>
+  <dt>Место в модели</dt>
+  <dd>{% if к.этап %}{{ к.этап }}{% else %}<span class="приглушённо">этап не задан</span>{% endif %}
+      {%- if к.фактор %} → {{ к.фактор }}{% endif %}
+      {%- if к.критерий %} → {{ к.критерий }}{% endif %}</dd>
   <dt>Связей признаков</dt>
   <dd>{{ к.связей }}
     {% for код, роль, статус in к.признаки %}
@@ -25,6 +29,15 @@
   <input type="text" id="source" name="source" value="{{ к.source or "" }}">
   <label for="note">{{ подписи.note }}</label>
   <input type="text" id="note" name="note" value="{{ к.note or "" }}">
+  {% if к.возможные_выше %}
+  <label for="parent_code">{{ подписи.parent_code }}</label>
+  <select id="parent_code" name="parent_code">
+    <option value="">— не задано —</option>
+    {% for код in к.возможные_выше %}
+    <option value="{{ код }}"{% if код == к.parent_code %} selected{% endif %}>{{ код }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
   {% include "_кнопки.html" %}
 </form>
 
