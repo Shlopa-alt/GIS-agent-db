@@ -8,6 +8,12 @@
 <input type="text" id="комментарий" name="комментарий"
        placeholder="чего не хватает в черновике или почему он неверен">
 <input type="hidden" name="открыто" value="{{ открыто }}">
+{# Откуда человек пришёл: после решения он должен попасть к следующему в той же
+   очереди и в том же порядке, а не в начало общего списка черновиков. #}
+{% if статус is defined %}
+<input type="hidden" name="статус" value="{{ статус }}">
+<input type="hidden" name="сорт" value="{{ сорт }}">
+{% endif %}
 <div class="кнопки">
   <button class="принять" type="submit" name="решение" value="подтверждён">Подтвердить</button>
   <button class="отклонить" type="submit" name="решение" value="отклонён">Отклонить</button>

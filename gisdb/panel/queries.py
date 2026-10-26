@@ -124,7 +124,7 @@ SELECT min(p.feature_id) AS id, f.code, f.group_code, count(*) AS паспорт
   JOIN data.feature f ON f.id = p.feature_id
  WHERE p.status = %s
  GROUP BY f.code, f.group_code
- ORDER BY f.group_code, f.code
+ ORDER BY {порядок}
 """
 
 СПИСОК_СЛОЁВ = """
@@ -134,7 +134,7 @@ SELECT p.layer_id AS id, l.code, l.kind AS group_code, 1 AS паспортов,
   FROM meta.layer_passport p
   JOIN data.source_layer l ON l.id = p.layer_id
  WHERE p.status = %s
- ORDER BY l.code
+ ORDER BY {порядок}
 """
 
 СПИСОК_ЛИЦЕНЗИЙ = """
@@ -144,7 +144,7 @@ SELECT c.id, c.code, NULL AS group_code, count(p.layer_id) AS паспортов
   LEFT JOIN meta.layer_passport p ON p.license_id = c.id
  WHERE c.status = %s
  GROUP BY c.id, c.code, c.title
- ORDER BY c.code
+ ORDER BY {порядок}
 """
 
 СПИСОК_СВЯЗЕЙ = """
@@ -154,7 +154,7 @@ SELECT b.id, f.code || ' → ' || b.concept_code AS code, b.role AS group_code,
   JOIN data.feature f ON f.id = b.feature_id
   LEFT JOIN runs.run r ON r.id = b.run_id
  WHERE b.status = %s
- ORDER BY f.code
+ ORDER BY {порядок}
 """
 
 СПИСОК_ПОНЯТИЙ = """
@@ -164,7 +164,7 @@ SELECT c.id, c.code, c.kind AS group_code, count(b.id) AS паспортов,
   LEFT JOIN bridge.feature_concept b ON b.concept_code = c.code
  WHERE c.status = %s
  GROUP BY c.id, c.code, c.kind, c.definition
- ORDER BY c.kind, c.code
+ ORDER BY {порядок}
 """
 
 # Цитаты в очереди сгруппированы по понятию только на вид: строка — это цитата,
@@ -176,7 +176,7 @@ SELECT ц.id, ц.concept_code AS code, ц.kb_found_by AS group_code, 1 AS пас
        false AS формула
   FROM kb.citation ц
  WHERE ц.status = %s
- ORDER BY ц.concept_code, ц.kb_similarity DESC NULLS LAST, ц.id
+ ORDER BY {порядок}
 """
 
 СПИСКИ = {
@@ -187,23 +187,90 @@ SELECT ц.id, ц.concept_code AS code, ц.kb_found_by AS group_code, 1 AS пас
 СТОЛБЦЫ_СПИСКА = ("id", "код", "группа", "паспортов", "текст",
                   "модель", "покрытие", "формула")
 
+#: Порядок строк в очереди. Ключ — то, что человек нажимает в заголовке
+#: столбца; значение — выражение для ORDER BY. Подставляется в запрос, поэтому
+#: берётся только отсюда: ни одно значение из адреса в SQL не попадает.
+#: Первый ключ каждого вида — порядок по умолчанию.
+#:
+#: Зачем это вообще. В очереди признаков 149 кодов, и разбирать их приходится
+#: не подряд: то по группе съёмки, то по исполнителю (41 паспорт описан внешней
+#: моделью и 6 — средством разработки, их надо найти и вернуть на доработку),
+#: то по покрытию. Без сортировки единственный способ — искать глазами.
+СОРТИРОВКИ: dict[str, dict[str, str]] = {
+    "признаки": {
+        "группа": "f.group_code, f.code",
+        "код": "f.code",
+        "исполнитель": "max(p.model), f.code",
+        "покрытие": "max(p.coverage_frac) DESC NULLS LAST, f.code",
+        "сборок": "count(*) DESC, f.code",
+        "в формуле": "bool_or(p.circularity) DESC, f.group_code, f.code",
+    },
+    "слои": {
+        "код": "l.code",
+        "вид": "l.kind, l.code",
+        "покрытие": "p.coverage_frac DESC NULLS LAST, l.code",
+    },
+    "лицензии": {"код": "c.code", "слоёв": "count(p.layer_id) DESC, c.code"},
+    "связи": {
+        "признак": "f.code, b.concept_code",
+        "понятие": "b.concept_code, f.code",
+        "роль": "b.role, f.code",
+    },
+    "понятия": {
+        "уровень": "c.kind, c.code",
+        "код": "c.code",
+        "признаков": "count(b.id) DESC, c.code",
+    },
+    "цитаты": {
+        "понятие": "ц.concept_code, ц.kb_similarity DESC NULLS LAST, ц.id",
+        "близость": "ц.kb_similarity DESC NULLS LAST, ц.id",
+        "чем нашлось": "ц.kb_found_by, ц.id",
+    },
+}
 
-def очередь(conn, вид: Вид, статус: str = "черновик") -> list[dict]:
+
+def порядок(вид: Вид, сорт: str | None) -> tuple[str, str]:
+    """Выражение сортировки и её имя. Неизвестное имя молча не подставляем —
+    берём умолчание вида: в ORDER BY уходит только то, что перечислено выше."""
+    варианты = СОРТИРОВКИ[вид.ключ]
+    имя = сорт if сорт in варианты else next(iter(варианты))
+    return варианты[имя], имя
+
+
+def очередь(conn, вид: Вид, статус: str = "черновик",
+            сорт: str | None = None) -> list[dict]:
     """Список объектов очереди. Признаки сведены по коду: смысл от сборки не зависит."""
-    строки = conn.execute(СПИСКИ[вид.ключ], (статус,)).fetchall()
+    выражение, _ = порядок(вид, сорт)
+    строки = conn.execute(
+        СПИСКИ[вид.ключ].format(порядок=выражение), (статус,)).fetchall()
     return [dict(zip(СТОЛБЦЫ_СПИСКА, с)) for с in строки]
 
 
-def следующий(conn, вид: Вид, после: int | None = None) -> int | None:
-    """Первый черновик очереди после указанного — чтобы идти подряд, не возвращаясь."""
-    записи = очередь(conn, вид, "черновик")
-    номера = [з["id"] for з in записи]
-    if после is None:
-        return номера[0] if номера else None
+def сосед(conn, вид: Вид, после: int | None = None, статус: str = "черновик",
+          шаг: int = 1, сорт: str | None = None) -> int | None:
+    """Соседний объект очереди в том же порядке, в каком она показана.
+
+    Статус — тот, который человек сейчас разбирает: по подтверждённым тоже
+    ходят подряд (ищут, что вернуть на доработку), и раньше перехода там не
+    было вовсе — приходилось возвращаться в список после каждой карточки.
+    """
+    номера = [з["id"] for з in очередь(conn, вид, статус, сорт)]
+    if not номера:
+        return None
+    if после not in номера:
+        return номера[0]
+    место = номера.index(после) + шаг
+    return номера[место] if 0 <= место < len(номера) else None
+
+
+def следующий(conn, вид: Вид, после: int | None = None,
+              статус: str = "черновик", сорт: str | None = None) -> int | None:
+    """Следующий объект очереди; дойдя до конца — первый, чтобы идти по кругу."""
+    дальше = сосед(conn, вид, после, статус, 1, сорт)
+    if дальше is not None:
+        return дальше
+    номера = [з["id"] for з in очередь(conn, вид, статус, сорт)]
     хвост = [н for н in номера if н != после]
-    if после in номера:
-        место = номера.index(после)
-        хвост = номера[место + 1:] or номера[:место]
     return хвост[0] if хвост else None
 
 
@@ -533,19 +600,24 @@ def применить(
     return затронуто
 
 
-def паспорта_кода(conn, feature_id: int) -> list[int]:
-    """Все черновики паспортов с тем же кодом признака.
+def паспорта_кода(conn, feature_id: int, статус: str = "черновик") -> list[int]:
+    """Все паспорта этого статуса с тем же кодом признака.
 
     Один код признака приходит из нескольких сборок, и геологический смысл у них
     общий: решение человека распространяется на все, иначе очередь из 240
     паспортов — это 240 одинаковых прочтений вместо 85.
+
+    Статус раньше был зашит в «черновик», и из-за этого по подтверждённому
+    паспорту пакетное решение не делало ничего: искались черновики того же
+    кода, их не было, список номеров выходил пустым. Галочки ставились,
+    кнопка нажималась, в базе не менялось ничего.
     """
     строки = conn.execute(
         """SELECT p.feature_id FROM meta.feature_passport p
              JOIN data.feature f ON f.id = p.feature_id
-            WHERE p.status = 'черновик'
+            WHERE p.status = %s
               AND f.code = (SELECT code FROM data.feature WHERE id = %s)""",
-        (feature_id,),
+        (статус, feature_id),
     ).fetchall()
     return [н for (н,) in строки]
 

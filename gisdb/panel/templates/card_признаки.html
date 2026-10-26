@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% include "_переход.html" %}
 <h1>{{ к.code }} <span class="приглушённо" style="font-size:15px">группа {{ к.группа }},
   статус: {{ к.status }}</span></h1>
 <p class="подзаголовок">Черновик составлен автоматически{% if к.model %} моделью
