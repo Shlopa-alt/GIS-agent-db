@@ -9,6 +9,7 @@
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -191,12 +192,95 @@ def test_рисунок_приходит_байтами(знания):
 
 
 # ---------------------------------------------------------------------- связи
-def test_молчащая_база_знаний_называет_обе_причины():
+def test_без_туннеля_совет_про_туннель():
+    """Порт у нас никто не слушает — значит, не поднят туннель, и совет про
+    сервер на той машине был бы лишним: до неё запрос не дошёл."""
     знания = к.БазаЗнаний("http://127.0.0.1:9", таймаут=1)
     with pytest.raises(к.НетСвязи) as сбой:
         знания.состояние()
     текст = str(сбой.value)
-    assert "georag.py web" in текст and "ssh -N -L" in текст
+    assert "туннель не поднят" in текст and "ssh -N -L" in текст
+    assert "georag.py web" not in текст
+
+
+def _сервер(обработчик):
+    сервер = ThreadingHTTPServer(("127.0.0.1", 0), обработчик)
+    threading.Thread(target=сервер.serve_forever, daemon=True).start()
+    return сервер, f"http://127.0.0.1:{сервер.server_address[1]}"
+
+
+class _ЗакрываетМолча(BaseHTTPRequestHandler):
+    """Так отвечает туннель, когда на той стороне сервер не запущен: ssh
+    принимает соединение сам и закрывает, не пробросив дальше."""
+
+    def log_message(self, *args):
+        pass
+
+    def handle(self):
+        self.rfile.readline()
+        self.request.close()
+
+
+def test_туннель_есть_сервера_нет_совет_про_сервер():
+    сервер, адрес = _сервер(_ЗакрываетМолча)
+    try:
+        with pytest.raises(к.НетСвязи) as сбой:
+            к.БазаЗнаний(адрес, таймаут=2).состояние()
+    finally:
+        сервер.shutdown()
+    текст = str(сбой.value)
+    assert "сервер базы знаний на той машине не запущен" in текст
+    assert "georag.py web" in текст
+
+
+class _ДолгийСловарь(_БазаЗнаний):
+    """Словарь имён не отвечает (как на той машине на 45 тысячах сущностей),
+    граф целиком — отвечает."""
+
+    def do_GET(self):  # noqa: N802
+        путь = urlparse(self.path).path
+        if путь == "/api/datasets":
+            time.sleep(1.5)
+            return
+        if путь == "/api/network":
+            self._json(200, {"nodes": [
+                {"kind": "сущность", "name": "shear zones", "facts": 40, "documents": 9,
+                 "category": "структура", "spellings": ["shear zone"]},
+                {"kind": "сущность", "name": "Билляхская зона", "facts": 12, "documents": 2,
+                 "category": "структура", "spellings": []},
+                {"kind": "статья", "name": "Какая-то статья", "doc_id": "10.1_a"},
+            ], "edges": []})
+            return
+        super().do_GET()
+
+
+def test_молчащий_словарь_имён_не_обвиняет_туннель(monkeypatch):
+    monkeypatch.setattr(к, "ТАЙМАУТ_ИМЁН", 1)
+    сервер, адрес = _сервер(_ДолгийСловарь)
+    try:
+        знания = к.БазаЗнаний(адрес, таймаут=5)
+        имена = знания.имена()
+    finally:
+        сервер.shutdown()
+    assert имена == ["shear zones", "Билляхская зона"], "богатые фактами первыми"
+    assert any("/api/network" in п for п in знания.пометки)
+    assert not any("туннель" in п for п in знания.пометки)
+
+
+def test_граф_без_статей_и_с_числами():
+    сервер, адрес = _сервер(_ДолгийСловарь)
+    try:
+        граф = к.БазаЗнаний(адрес, таймаут=5).граф()
+    finally:
+        сервер.shutdown()
+    assert [с["имя"] for с in граф] == ["shear zones", "Билляхская зона"]
+    assert граф[0] == {"имя": "shear zones", "фактов": 40, "статей": 9,
+                       "вид": "структура", "написания": ["shear zone"]}
+
+
+def test_состояние_несёт_время_разметки(знания):
+    """Им мост помечает каждую цитату; без ключа kb_as_of оставался пустым."""
+    assert знания.состояние()["проверено"] == "2026-10-22T18:00:00+00:00"
 
 
 def test_нет_адреса_значит_правки_не_применены(знания_без_правок):
