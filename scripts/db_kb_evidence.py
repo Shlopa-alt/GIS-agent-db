@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gisdb import db  # noqa: E402
 from gisdb import db_ingest as ingest  # noqa: E402
 from gisdb import kb_client  # noqa: E402
+from gisdb import kb_snapshot  # noqa: E402
 
 СКРИПТ = "scripts/db_kb_evidence.py"
 
@@ -94,10 +95,14 @@ SELECT c.code, c.definition,
  ORDER BY c.code
 """
 
+#: Только подтверждённые якоря. Подбор (scripts/db_kb_anchors.py) кладёт по
+#: нескольку кандидатов на понятие черновиками; пойди мост по ним всем, в
+#: литературу понятия попали бы факты о сущностях, которые человек ещё не
+#: признал тем же самым.
 ЯКОРЯ = """
 SELECT concept_code, kb_name, relations
   FROM bridge.concept_anchor
- WHERE status <> 'отклонён' AND NOT absent AND kb_name IS NOT NULL
+ WHERE status = 'подтверждён' AND NOT absent AND kb_name IS NOT NULL
 """
 
 ЧЕРНОВЫЕ_ПАСПОРТА = """
@@ -366,6 +371,8 @@ def main(аргументы: list[str] | None = None) -> int:
         всего = 0
         with ingest.run(conn, script=СКРИПТ,
                         note=f"литература по {len(ответы)} понятиям") as run_id:
+            прошлый = kb_snapshot.записать(conn, состояние, СКРИПТ, run_id)
+            print("  " + kb_snapshot.сравнение(прошлый, состояние))
             публикации: dict[str, int] = {}
             for о in ответы:
                 for ц in о["фрагменты"]:
