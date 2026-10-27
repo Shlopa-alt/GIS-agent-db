@@ -67,6 +67,15 @@ class Вид:
         "kb.citation", "id",
         (),
     ),
+    # Якорь — утверждение «понятие отвечает этой сущности графа базы знаний».
+    # Имя сущности не правится: другое имя — другой якорь, и подбирает его
+    # скрипт по графу, а не человек по памяти. Править можно, какие связи
+    # графа брать и чем искать, если граф молчит.
+    "якоря": Вид(
+        "якоря", "якорь понятия", "Якоря понятий в графе базы знаний",
+        "bridge.concept_anchor", "id",
+        ("relations", "query", "note"),
+    ),
 }
 
 # Человеческие подписи полей: в форме правки и в журнале решений.
@@ -87,6 +96,8 @@ class Вид:
     "source": "Откуда определение",
     "kind": "Род понятия",
     "parent_code": "Понятие уровнем выше",
+    "relations": "Связи графа в работу",
+    "query": "Запасной запрос по фрагментам",
 }
 
 СТАТУСЫ = ("черновик", "подтверждён", "отклонён")
@@ -179,10 +190,24 @@ SELECT ц.id, ц.concept_code AS code, ц.kb_found_by AS group_code, 1 AS пас
  ORDER BY {порядок}
 """
 
+# Якоря: в столбце кода — понятие и имя в графе, в тексте — чем подобран
+# (основа слова, фактов и статей). Так в списке сразу видно, что за якорем
+# стоит: двадцать статей или одна.
+СПИСОК_ЯКОРЕЙ = """
+SELECT я.id, я.concept_code || ' → ' || coalesce(я.kb_name, 'в графе нет') AS code,
+       CASE WHEN я.absent THEN 'нет в графе' ELSE 'сущность' END AS group_code,
+       1 AS паспортов, я.note AS текст, NULL AS model, NULL AS покрытие,
+       false AS формула
+  FROM bridge.concept_anchor я
+ WHERE я.status = %s
+ ORDER BY {порядок}
+"""
+
 СПИСКИ = {
     "признаки": СПИСОК_ПРИЗНАКОВ, "слои": СПИСОК_СЛОЁВ,
     "лицензии": СПИСОК_ЛИЦЕНЗИЙ, "связи": СПИСОК_СВЯЗЕЙ,
     "понятия": СПИСОК_ПОНЯТИЙ, "цитаты": СПИСОК_ЦИТАТ,
+    "якоря": СПИСОК_ЯКОРЕЙ,
 }
 СТОЛБЦЫ_СПИСКА = ("id", "код", "группа", "паспортов", "текст",
                   "модель", "покрытие", "формула")
@@ -225,6 +250,10 @@ SELECT ц.id, ц.concept_code AS code, ц.kb_found_by AS group_code, 1 AS пас
         "понятие": "ц.concept_code, ц.kb_similarity DESC NULLS LAST, ц.id",
         "близость": "ц.kb_similarity DESC NULLS LAST, ц.id",
         "чем нашлось": "ц.kb_found_by, ц.id",
+    },
+    "якоря": {
+        "понятие": "я.concept_code, я.absent, я.id",
+        "имя": "я.kb_name NULLS LAST, я.id",
     },
 }
 
@@ -450,6 +479,12 @@ def карточка_понятия(conn, concept_id: int) -> dict:
         (к["code"],),
     ).fetchall()
     к["цитаты"] = цитаты_понятия(conn, к["code"])
+    к["якоря"] = conn.execute(
+        """SELECT id, coalesce(kb_name, 'в графе нет'), status::text, note
+             FROM bridge.concept_anchor WHERE concept_code = %s
+            ORDER BY absent, id""",
+        (к["code"],),
+    ).fetchall()
     к["значения_полей"] = {п: к[п] for п in ВИДЫ["понятия"].поля}
     return к
 
@@ -504,10 +539,44 @@ def карточка_цитаты(conn, citation_id: int) -> dict:
     return к
 
 
+def карточка_якоря(conn, anchor_id: int) -> dict:
+    строка = conn.execute(
+        """SELECT я.concept_code, я.kb_name, я.relations, я.query, я.absent,
+                  я.note, я.status::text, c.id, c.kind, c.definition
+             FROM bridge.concept_anchor я
+             JOIN kb.concept c ON c.code = я.concept_code
+            WHERE я.id = %s""",
+        (anchor_id,),
+    ).fetchone()
+    if строка is None:
+        raise KeyError(anchor_id)
+    имена = ("concept_code", "kb_name", "relations", "query", "absent", "note",
+             "status", "понятие_id", "род", "определение")
+    к = dict(zip(имена, строка))
+    к["id"] = anchor_id
+    к["заголовок"] = f"{к['concept_code']} → {к['kb_name'] or 'в графе нет'}"
+    # Соседи по понятию: якорь решается не один, а в ряду кандидатов, —
+    # человек выбирает лучшие из предложенных, а не судит каждый в отрыве.
+    к["соседи"] = conn.execute(
+        """SELECT id, coalesce(kb_name, 'в графе нет'), status::text, note
+             FROM bridge.concept_anchor
+            WHERE concept_code = %s AND id <> %s ORDER BY absent, id""",
+        (к["concept_code"], anchor_id),
+    ).fetchall()
+    # Связи хранятся списком и сравниваются списком: строка формы приводится
+    # к нему в `_приведение`, иначе любое сохранение выглядело бы правкой.
+    к["значения_полей"] = {
+        "relations": list(к["relations"] or []),
+        "query": к["query"], "note": к["note"],
+    }
+    return к
+
+
 КАРТОЧКИ = {
     "признаки": карточка_признака, "слои": карточка_слоя,
     "лицензии": карточка_лицензии, "связи": карточка_связи,
     "понятия": карточка_понятия, "цитаты": карточка_цитаты,
+    "якоря": карточка_якоря,
 }
 
 
@@ -544,6 +613,8 @@ def _приведение(вид: Вид, поле: str, значение: str):
         return значение in ("да", "on", "true", "True")
     if поле == "license_id":
         return int(значение) if значение else None
+    if поле == "relations":
+        return [с.strip() for с in значение.split(",") if с.strip()]
     return значение or None
 
 

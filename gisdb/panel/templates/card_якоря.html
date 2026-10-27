@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_переход.html" %}
+<h1>{{ к.заголовок }}
+  <span class="приглушённо" style="font-size:15px">статус: {{ к.status }}</span></h1>
+<p class="подзаголовок">Якорь говорит мосту, где в графе фактов базы знаний
+искать литературу под понятие. За фактом графа стоит цитата, которую база знаний
+проверила по тексту статьи, — поэтому якорь важнее любой отдельной цитаты:
+подтверждённый, он приводит литературу ко всем признакам понятия. Подтверждайте
+сущность, о которой статьи говорят то же, что определение понятия, а не просто
+похожее слово.</p>
+
+<dl class="факты">
+  <dt>Понятие</dt>
+  <dd><a href="/карточка/понятия/{{ к.понятие_id }}">{{ к.concept_code }}</a>
+    <span class="приглушённо">— {{ к.род }}</span>
+    <br><span class="мелко">{{ к.определение }}</span></dd>
+  <dt>Сущность в графе</dt>
+  <dd>{% if к.absent %}<span class="приглушённо">в графе нет — цитаты берутся поиском по фрагментам</span>
+      {% else %}{{ к.kb_name }}{% endif %}</dd>
+  <dt>Чем подобран</dt><dd>{{ к.note or "не указано" }}</dd>
+  {% if к.соседи %}
+  <dt>Другие кандидаты понятия</dt>
+  <dd>{% for номер, имя, статус, пометка in к.соседи %}
+      <a href="/карточка/якоря/{{ номер }}?статус={{ статус }}">{{ имя }}</a>
+      <span class="приглушённо">— {{ статус }}</span><br>
+    {% endfor %}</dd>
+  {% endif %}
+</dl>
+
+<form class="решение" method="post" action="/решение/якоря/{{ к.id }}">
+  <label for="relations">{{ подписи.relations }}
+    <span class="приглушённо" style="font-weight:400">— через запятую; пусто — все связи</span></label>
+  <input type="text" id="relations" name="relations"
+         value="{{ (к.значения_полей.relations or [])|join(', ') }}">
+  <label for="query">{{ подписи.query }}</label>
+  <input type="text" id="query" name="query" value="{{ к.query or "" }}">
+  <label for="note">{{ подписи.note }}</label>
+  <input type="text" id="note" name="note" value="{{ к.note or "" }}">
+  {% include "_кнопки.html" %}
+</form>
+
+{% if к.решения %}
+<h2>Что решали раньше</h2>
+<table>
+  <tr><th>Когда</th><th>Кто</th><th>Решение</th><th>Причина</th></tr>
+  {% for время, кто_решал, решение, причина in к.решения %}
+  <tr><td class="приглушённо">{{ время.strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ кто_решал }}</td><td>{{ решение }}</td><td>{{ причина or "" }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}
